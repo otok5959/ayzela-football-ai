@@ -56,6 +56,16 @@ def test_all_18_telegram_commands_and_manual_queue(temp_repo):
     assert len(jobs) == 1
     assert "Galatasaray" in jobs[0]["payload_json"]
 
+    # Immediate full analysis trigger (/simdi_analiz)
+    now_res = router.handle_update(
+        {"callback_query": {"id": "cb1", "from": {"id": 111222333}, "message": {"chat": {"id": 111222333}}, "data": "/simdi_analiz"}}
+    )
+    assert now_res["authorized"] is True
+    assert now_res["status_code"] == 200
+    jobs2 = temp_repo.db.execute("SELECT * FROM job_queue WHERE job_type = 'manual_analysis'")
+    assert len(jobs2) == 2
+    assert any("full_now" in j["payload_json"] for j in jobs2)
+
 
 def test_duplicate_telegram_notification_blocked(temp_repo):
     bot = TelegramBotClient(repo=temp_repo, bot_token="", chat_id="111222333")

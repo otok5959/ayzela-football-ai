@@ -13,19 +13,20 @@ def format_daily_report_tr(
     bulletin_source: str,
     panel_url: str,
     used_fallback: bool = False,
+    max_matches: int = 15,
 ) -> str:
     sorted_bundles = sorted(
         bundles,
         key=lambda b: (b.data_coverage_score, b.research_quality_score),
         reverse=True,
-    )[:10]
+    )[:max_matches]
 
     lines: list[str] = [
         f"📊 *AyzEla Football AI – {run_type_label}*",
         f"📅 Analiz Günü (TRT): `{analysis_day_tr}`",
         f"📡 Bülten Kaynağı: `{bulletin_source}`"
         + (" (⚠️ Yedek kaynak — İddaa onaylı değildir)" if used_fallback else " (✅ İddaa.com doğrulandı)"),
-        f"⚽ İncelenen Maç: {len(sorted_bundles)} / 10",
+        f"⚽ İncelenen Maç: {len(sorted_bundles)} / {max_matches}",
         "",
     ]
 

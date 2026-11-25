@@ -82,6 +82,8 @@ export function PanelContent({
   onAddLeague,
   onDispatchQuery,
   onRunSourceCheck,
+  onRunAnalysisNow,
+  runningNow,
   isDemoMode,
 }: {
   tab: PanelTabId;
@@ -96,6 +98,8 @@ export function PanelContent({
   onAddLeague: (p: { organization_id: string; name_tr: string; country: string; country_code: string }) => void;
   onDispatchQuery: (q: string) => void;
   onRunSourceCheck: () => void;
+  onRunAnalysisNow: () => void;
+  runningNow: boolean;
   isDemoMode: boolean;
 }) {
   const [query, setQuery] = useState("");
@@ -115,7 +119,7 @@ export function PanelContent({
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <div className="rounded-xl border border-slate-800 bg-pitch-800 p-4">
             <div className="text-xs text-slate-400">Analiz Edilen Maç</div>
-            <div className="mt-1 text-2xl font-bold text-emerald-400">{fixtures.length} / 10</div>
+            <div className="mt-1 text-2xl font-bold text-emerald-400">{fixtures.length} / 15</div>
             <div className="mt-1 text-xs text-slate-500">Günlük üst sınır aktif</div>
           </div>
           <div className="rounded-xl border border-slate-800 bg-pitch-800 p-4">
@@ -152,7 +156,7 @@ export function PanelContent({
     return (
       <div className="space-y-4">
         <h2 className="text-lg font-semibold text-slate-100">
-          {tab === "fixtures" ? "Günlük Karşılaşmalar (Maks. 10)" : tab === "history" ? "Değiştirilemez Geçmiş Analizler" : "Sonuç Takip Merkezi"}
+          {tab === "fixtures" ? "Günlük Karşılaşmalar (Maks. 15)" : tab === "history" ? "Değiştirilemez Geçmiş Analizler" : "Sonuç Takip Merkezi"}
         </h2>
         <div className="grid gap-3">
           {fixtures.map((f) => (
@@ -390,8 +394,17 @@ export function PanelContent({
 
   if (tab === "jobs") {
     return (
-      <div className="space-y-3 rounded-xl border border-slate-800 bg-pitch-800 p-5">
-        <h2 className="text-lg font-semibold">Otomatik Görev Yönetimi (GitHub Actions)</h2>
+      <div className="space-y-4 rounded-xl border border-slate-800 bg-pitch-800 p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold">Otomatik Görev Yönetimi (GitHub Actions)</h2>
+          <button
+            onClick={onRunAnalysisNow}
+            disabled={runningNow}
+            className="rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+          >
+            {runningNow ? "⏳ Analiz Başlatılıyor..." : "⚡ Şimdi Analiz Et"}
+          </button>
+        </div>
         <ul className="space-y-2 text-sm text-slate-300">
           <li>• 08:00 TRT – Birinci kapsamlı analiz (`daily_0800_analysis.yml`)</li>
           <li>• 11:59 TRT – İkinci bağımsız analiz (`daily_1159_analysis.yml`)</li>
@@ -436,7 +449,7 @@ export function PanelContent({
     <div className="space-y-3 rounded-xl border border-slate-800 bg-pitch-800 p-5 text-sm text-slate-300">
       <h2 className="text-lg font-semibold text-white">Genel Sistem Ayarları</h2>
       <p>• Saat Dilimi: `Europe/Istanbul` (UTC+3)</p>
-      <p>• Günlük Maksimum Maç: `10`</p>
+      <p>• Günlük Maksimum Maç: `15`</p>
       <p>• `FREE_ONLY_MODE`: `Aktif` (Ücretli AI ve ücretli futbol API kullanımı engellidir)</p>
       <p>• `football-data.co.uk`: Kalıcı olarak devre dışı bırakıldı</p>
     </div>

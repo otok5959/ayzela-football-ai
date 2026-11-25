@@ -100,13 +100,15 @@ class _StubFailover:
         return self._history
 
 
-def test_morning_0800_and_independent_1159_and_max_10_cap(temp_repo):
+def test_morning_0800_and_independent_1159_and_max_15_cap(temp_repo):
     history = _synthetic_history()
     now_0800 = datetime(2026, 11, 25, 8, 3, tzinfo=ISTANBUL_TZ)  # 3 min delay recorded
     fixtures = []
-    # Create 14 valid fixtures inside [08:00, next 08:00) + 1 postponed + 1 past
-    for i in range(14):
-        ko_tr = datetime(2026, 11, 25, 13 + (i % 10), 0, tzinfo=ISTANBUL_TZ)
+    # Create 18 distinct valid fixtures inside [08:00, next 08:00)
+    for i in range(18):
+        ko_tr = datetime(2026, 11, 25, 13 + (i % 10), i % 40, tzinfo=ISTANBUL_TZ)
+        h_num = (i % 12) + 1
+        a_num = ((i + 1 + (i // 12)) % 12) + 13
         fixtures.append(
             FixtureRecord(
                 fixture_id=f"fx_{i}",
@@ -115,10 +117,10 @@ def test_morning_0800_and_independent_1159_and_max_10_cap(temp_repo):
                 organization_id="eng_premier_league",
                 league_name="İngiltere Premier League",
                 country="İngiltere",
-                home_team=f"Team{(i*2)%24 + 1}",
-                away_team=f"Team{(i*2 + 1)%24 + 1}",
-                home_team_id=f"team_{(i*2)%24 + 1}",
-                away_team_id=f"team_{(i*2 + 1)%24 + 1}",
+                home_team=f"Team{h_num}",
+                away_team=f"Team{a_num}",
+                home_team_id=f"team_{h_num}",
+                away_team_id=f"team_{a_num}",
                 kickoff_utc=(ko_tr - timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ"),
                 kickoff_tr=ko_tr.isoformat(),
                 analysis_day_tr="2026-11-25",
@@ -141,7 +143,7 @@ def test_morning_0800_and_independent_1159_and_max_10_cap(temp_repo):
     )
     assert res_morning["status"] == "completed"
     assert res_morning["delay_seconds"] == 180
-    assert len(res_morning["bundles"]) == 10  # Max 10 cap enforced
+    assert len(res_morning["bundles"]) == 15  # Max 15 cap enforced
 
     # Independent 11:59 run recalculates with fresh run_id and new predictions
     now_1159 = datetime(2026, 11, 25, 11, 59, tzinfo=ISTANBUL_TZ)

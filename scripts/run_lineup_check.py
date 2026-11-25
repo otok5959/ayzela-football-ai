@@ -36,20 +36,32 @@ def main() -> None:
             summary = f"Kaynak sağlık kontrolü tamamlandı: {healthy}/{len(statuses)} sağlıklı."
             repo.update_job_status(job["job_id"], "completed", summary)
         elif job["job_type"] == "manual_analysis":
-            res = run_daily_analysis(repo=repo, failover=failover, run_type="manual", send_telegram=False)
-            q = str(payload.get("query", "")).lower()
-            matched = [b for b in res["bundles"] if q in b.fixture.home_team.lower() or q in b.fixture.away_team.lower()]
-            summary = f"Manuel analiz tamamlandı ({len(matched)} eşleşen maç)."
-            repo.update_job_status(job["job_id"], "completed", summary)
-            if matched:
-                b = matched[0]
-                bot.send_message(
-                    f"🔎 *Manuel Analiz Tamamlandı*\n*{b.fixture.home_team} - {b.fixture.away_team}*\n"
-                    f"1-X-2: `%{int(b.prob_home*100)}/%{int(b.prob_draw*100)}/%{int(b.prob_away*100)}` | "
-                    f"Veri Kapsamı: `%{int(b.data_coverage_score*100)}`",
-                    dedup_key=f"manual_job_{job['job_id']}",
-                    notification_type="manual_analysis",
-                )
+            q = str(payload.get("query", "")).strip().lower()
+            is_full_now = payload.get("mode") == "full_now" or not q
+            if is_full_now:
+                res = run_daily_analysis(repo=repo, failover=failover, run_type="manual", send_telegram=True)
+                summary = f"Anlık analiz tamamlandı ({len(res['bundles'])} maç)."
+                repo.update_job_status(job["job_id"], "completed", summary)
+            else:
+                res = run_daily_analysis(repo=repo, failover=failover, run_type="manual", send_telegram=False)
+                matched = [b for b in res["bundles"] if q in b.fixture.home_team.lower() or q in b.fixture.away_team.lower()]
+                summary = f"Manuel analiz tamamlandı ({len(matched)} eşleşen maç)."
+                repo.update_job_status(job["job_id"], "completed", summary)
+                if matched:
+                    b = matched[0]
+                    bot.send_message(
+                        f"🔎 *Manuel Analiz Tamamlandı*\n*{b.fixture.home_team} - {b.fixture.away_team}*\n"
+                        f"1-X-2: `%{int(b.prob_home*100)}/%{int(b.prob_draw*100)}/%{int(b.prob_away*100)}` | "
+                        f"Veri Kapsamı: `%{int(b.data_coverage_score*100)}`",
+                        dedup_key=f"manual_job_{job['job_id']}",
+                        notification_type="manual_analysis",
+                    )
+                else:
+                    bot.send_message(
+                        f"🔎 Bugünkü pencerede `{payload.get('query', '')}` için eşleşen maç bulunamadı.",
+                        dedup_key=f"manual_job_{job['job_id']}_empty",
+                        notification_type="manual_analysis",
+                    )
         else:
             repo.update_job_status(job["job_id"], "completed", "İşlendi")
     print(f"Kuyruk kontrolü tamamlandı: {len(queued)} iş işlendi.")

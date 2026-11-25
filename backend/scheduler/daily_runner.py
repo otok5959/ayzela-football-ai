@@ -200,7 +200,16 @@ def run_daily_analysis(
         notes_tr=f"{len(candidates)} aday içinden {len(bundles)} maç analiz edildi (gecikme={delay_seconds}s).",
     )
 
-    label = "Sabah Analizi (08:00 TRT)" if run_type == "morning_0800" else "Öğle Bağımsız Analiz (11:59 TRT)"
+    if run_type == "morning_0800":
+        label = "Sabah Analizi (08:00 TRT)"
+        dedup_key = f"daily_report_{win.analysis_day_tr}_{run_type}"
+    elif run_type == "midday_1159":
+        label = "Öğle Bağımsız Analiz (11:59 TRT)"
+        dedup_key = f"daily_report_{win.analysis_day_tr}_{run_type}"
+    else:
+        label = "Anlık Manuel Analiz (TRT)"
+        dedup_key = f"manual_report_{run_id}"
+
     report_text = format_daily_report_tr(
         bundles=bundles,
         run_type_label=label,
@@ -208,13 +217,14 @@ def run_daily_analysis(
         bulletin_source=bulletin.primary_source,
         panel_url=settings.panel_base_url,
         used_fallback=bulletin.used_fallback,
+        max_matches=settings.daily_max_matches,
     )
 
     tg_result = None
     if send_telegram:
         tg_result = bot_client.send_message(
             text=report_text,
-            dedup_key=f"daily_report_{win.analysis_day_tr}_{run_type}",
+            dedup_key=dedup_key,
             notification_type="daily_report",
         )
 

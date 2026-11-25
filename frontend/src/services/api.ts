@@ -105,6 +105,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ task: "manual_analysis", query }),
     }),
+  runAnalysisNow: () =>
+    requestJson<{ ok: boolean; job_id: string; dispatch?: { detail?: string } }>("/api/analysis/run-now", {
+      method: "POST",
+    }),
+  jobs: () => requestJson<{ jobs: any[] }>("/api/jobs"),
   logs: () => requestJson<{ logs: any[] }>("/api/logs"),
   backtests: () => requestJson<{ backtests: any[] }>("/api/backtests"),
 };

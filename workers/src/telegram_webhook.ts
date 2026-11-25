@@ -19,6 +19,9 @@ function mainKeyboard() {
   return {
     inline_keyboard: [
       [
+        { text: "⚡ Şimdi Analiz Et", callback_data: "/simdi_analiz" },
+      ],
+      [
         { text: "📊 Bugünkü Rapor", callback_data: "/bugun" },
         { text: "📅 Yarın Fikstürü", callback_data: "/yarin" },
       ],
@@ -32,6 +35,15 @@ function mainKeyboard() {
       ],
     ],
   };
+}
+
+async function answerCallback(env: Env, callbackQueryId?: string): Promise<void> {
+  if (!env.TELEGRAM_BOT_TOKEN || !callbackQueryId) return;
+  await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/answerCallbackQuery`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ callback_query_id: callbackQueryId }),
+  });
 }
 
 async function sendTelegramReply(env: Env, chatId: string, text: string, withMenu = true): Promise<void> {
@@ -69,6 +81,10 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
     return new Response("Unauthorized", { status: 403 });
   }
 
+  if (update.callback_query?.id) {
+    await answerCallback(env, update.callback_query.id);
+  }
+
   const [rawCmd, ...rest] = rawText.split(/\s+/);
   const cmd = (rawCmd || "/menu").split("@")[0].toLowerCase();
   const arg = rest.join(" ").trim();
@@ -77,7 +93,18 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
   let reply = "ℹ️ Komut listesi için /yardim yazabilirsiniz.";
 
   if (cmd === "/start" || cmd === "/menu") {
-    reply = "⚽ *AyzEla Football AI* aktif.\nKişisel futbol araştırma ve analiz asistanınız hazır.";
+    reply = "⚽ *AyzEla Football AI* aktif.\nSabit 08:00 / 11:59 analizleri dışında istediğiniz an *⚡ Şimdi Analiz Et* butonuna basabilirsiniz.";
+  } else if (cmd === "/simdi_analiz") {
+    const jobId = `job_${crypto.randomUUID().slice(0, 10)}`;
+    await env.DB.prepare(
+      "INSERT INTO job_queue (job_id, job_type, payload_json, requested_by_telegram_id, status, created_at_utc) VALUES (?, 'manual_analysis', ?, ?, 'queued', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+    )
+      .bind(jobId, JSON.stringify({ mode: "full_now" }), String(uid))
+      .run();
+    const disp = await dispatchGithubWorkflow(env, "manual_dispatch.yml", { job_id: jobId, task: "full_now" });
+    reply = disp.ok
+      ? `⚡ *Anlık analiz başlatıldı!*\nİş No: \`${jobId}\`\n1-2 dakika içinde tamamlandığında rapor buraya ve web paneline düşecektir.`
+      : `⚠️ İş kuyruğa eklendi (\`${jobId}\`) ancak GitHub Actions tetiklenemedi: ${disp.detail}`;
   } else if (cmd === "/panel") {
     reply = `🖥️ *Web Yönetim Paneli*\n${env.PANEL_ORIGIN}`;
   } else if (cmd === "/ligler") {
@@ -96,7 +123,7 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
     const res = await env.DB.prepare(
       `SELECT f.home_team_name, f.away_team_name, f.league_name, mp.prob_home, mp.prob_draw, mp.prob_away, mp.data_coverage_score
        FROM match_predictions mp JOIN fixtures f ON mp.fixture_id = f.fixture_id
-       WHERE mp.is_demo = 0 ORDER BY mp.created_at_utc DESC LIMIT 10`
+       WHERE mp.is_demo = 0 ORDER BY mp.created_at_utc DESC LIMIT 15`
     ).all();
     if (!res.results?.length) {
       reply = "📊 Henüz bugüne ait analiz kaydı bulunmuyor.";

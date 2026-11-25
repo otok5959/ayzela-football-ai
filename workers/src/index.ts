@@ -183,6 +183,22 @@ export default {
         return jsonResponse({ ok: true }, 200, origin);
       }
 
+      if (url.pathname === "/api/analysis/run-now" && request.method === "POST") {
+        const jobId = `job_${crypto.randomUUID().slice(0, 10)}`;
+        await env.DB.prepare(
+          "INSERT INTO job_queue (job_id, job_type, payload_json, status, created_at_utc) VALUES (?, 'manual_analysis', ?, 'queued', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
+        )
+          .bind(jobId, JSON.stringify({ mode: "full_now" }))
+          .run();
+        const disp = await dispatchGithubWorkflow(env, "manual_dispatch.yml", { job_id: jobId, task: "full_now" });
+        return jsonResponse({ ok: disp.ok, job_id: jobId, dispatch: disp }, disp.ok ? 200 : 502, origin);
+      }
+
+      if (url.pathname === "/api/jobs" && request.method === "GET") {
+        const rows = await env.DB.prepare("SELECT * FROM job_queue ORDER BY created_at_utc DESC LIMIT 15").all();
+        return jsonResponse({ jobs: rows.results }, 200, origin);
+      }
+
       if (url.pathname === "/api/jobs/dispatch" && request.method === "POST") {
         const b = (await request.json()) as { task: string; query?: string };
         const jobId = `job_${crypto.randomUUID().slice(0, 10)}`;

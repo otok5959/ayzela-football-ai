@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     app_env: str = Field(default="development", alias="APP_ENV")
     tz: str = Field(default="Europe/Istanbul", alias="TZ")
     free_only_mode: bool = Field(default=True, alias="FREE_ONLY_MODE")
-    daily_max_matches: int = Field(default=10, alias="DAILY_MAX_MATCHES")
+    daily_max_matches: int = Field(default=15, alias="DAILY_MAX_MATCHES")
     lineup_check_interval_minutes: int = Field(default=30, alias="LINEUP_CHECK_INTERVAL_MINUTES")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
 

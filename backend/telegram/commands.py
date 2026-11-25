@@ -68,6 +68,7 @@ class TelegramCommandRouter:
             "/bugun": self._cmd_bugun,
             "/yarin": self._cmd_yarin,
             "/analiz": self._cmd_analiz,
+            "/simdi_analiz": self._cmd_simdi_analiz,
             "/kadro": self._cmd_kadro,
             "/haberler": self._cmd_haberler,
             "/sonuclar": self._cmd_sonuclar,
@@ -121,7 +122,7 @@ class TelegramCommandRouter:
             JOIN fixtures f ON mp.fixture_id = f.fixture_id
             WHERE mp.analysis_day_tr = ? AND mp.is_demo = 0
             ORDER BY mp.created_at_utc DESC, mp.data_coverage_score DESC
-            LIMIT 10
+            LIMIT 15
             """,
             (today_tr,),
         )
@@ -139,7 +140,7 @@ class TelegramCommandRouter:
 
     def _cmd_yarin(self, _: str) -> tuple[str, dict]:
         tomorrow_tr = (datetime.now(ISTANBUL_TZ).date() + timedelta(days=1)).isoformat()
-        rows = self.repo.list_fixtures_for_day(tomorrow_tr, include_demo=False)[:10]
+        rows = self.repo.list_fixtures_for_day(tomorrow_tr, include_demo=False)[:15]
         if not rows:
             return (f"📅 `{tomorrow_tr}` için kayıtlı fikstür henüz yok.", main_menu_keyboard())
         lines = [f"📅 *Yarının Fikstürü ({tomorrow_tr})*"]
@@ -149,7 +150,7 @@ class TelegramCommandRouter:
 
     def _cmd_analiz(self, arg: str) -> tuple[str, dict]:
         if not arg:
-            return ("🔎 Kullanım: `/analiz Galatasaray` veya `/analiz Real Madrid`", main_menu_keyboard())
+            return ("🔎 Kullanım: `/analiz Galatasaray` veya anlık tam analiz için `/simdi_analiz`", main_menu_keyboard())
         job_id = self.repo.enqueue_job(
             job_type="manual_analysis",
             payload={"query": arg},
@@ -160,6 +161,19 @@ class TelegramCommandRouter:
             f"Sorgu: `{arg}`\n"
             f"İş No: `{job_id}`\n"
             f"Analiz tamamlandığında sonuç otomatik gönderilecektir.",
+            main_menu_keyboard(),
+        )
+
+    def _cmd_simdi_analiz(self, _: str) -> tuple[str, dict]:
+        job_id = self.repo.enqueue_job(
+            job_type="manual_analysis",
+            payload={"mode": "full_now"},
+            requested_by_telegram_id=self.allowed_user_id or get_settings().telegram_allowed_user_id,
+        )
+        return (
+            f"⚡ *Anlık tam analiz kuyruğa eklendi*\n"
+            f"İş No: `{job_id}`\n"
+            f"Tamamlandığında güncel rapor buraya gönderilecektir.",
             main_menu_keyboard(),
         )
 
@@ -197,7 +211,7 @@ class TelegramCommandRouter:
             FROM match_results mr
             JOIN fixtures f ON mr.fixture_id = f.fixture_id
             WHERE mr.is_demo = 0
-            ORDER BY mr.recorded_at DESC LIMIT 10
+            ORDER BY mr.recorded_at DESC LIMIT 15
             """
         )
         if not rows:

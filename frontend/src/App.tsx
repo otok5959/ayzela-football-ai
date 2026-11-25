@@ -10,6 +10,7 @@ export default function App() {
   const [password, setPassword] = useState("");
   const [authError, setAuthError] = useState("");
   const [toast, setToast] = useState("");
+  const [runningNow, setRunningNow] = useState(false);
 
   const [fixtures, setFixtures] = useState<FixtureRow[]>([]);
   const [sources, setSources] = useState<SourceHealthRow[]>([]);
@@ -65,6 +66,22 @@ export default function App() {
       await loadRealData(true);
     } catch (err: any) {
       setAuthError(err.message || "Giriş başarısız");
+    }
+  }
+
+  async function handleRunNow() {
+    if (demoMode) {
+      setToast("Önizleme modunda canlı bulut analizi başlatılamaz.");
+      return;
+    }
+    setRunningNow(true);
+    try {
+      const res = await api.runAnalysisNow();
+      setToast(`⚡ Anlık analiz başlatıldı (İş: ${res.job_id}). 1-2 dakika içinde Telegram'a ve panele düşecektir.`);
+    } catch (err: any) {
+      setToast(`⚠️ Anlık analiz başlatılamadı: ${err.message || "Bilinmeyen hata"}`);
+    } finally {
+      setRunningNow(false);
     }
   }
 
@@ -139,17 +156,39 @@ export default function App() {
             {toast}
           </div>
         )}
-        <div className="mb-4 flex items-center justify-between md:hidden">
-          <div className="text-sm font-bold text-emerald-400">AyzEla Football AI</div>
-          <select
-            value={tab}
-            onChange={(e) => setTab(e.target.value as PanelTabId)}
-            className="rounded-lg border border-slate-700 bg-pitch-800 px-2 py-1 text-xs text-white"
-          >
-            {PANEL_SECTIONS.map((s) => (
-              <option key={s.id} value={s.id}>{s.title}</option>
-            ))}
-          </select>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-bold text-emerald-400 md:hidden">AyzEla AI</div>
+            <select
+              value={tab}
+              onChange={(e) => setTab(e.target.value as PanelTabId)}
+              className="rounded-lg border border-slate-700 bg-pitch-800 px-2 py-1 text-xs text-white md:hidden"
+            >
+              {PANEL_SECTIONS.map((s) => (
+                <option key={s.id} value={s.id}>{s.title}</option>
+              ))}
+            </select>
+            <div className="hidden text-xs text-slate-400 md:block">
+              Sabit analiz: 08:00 & 11:59 TRT • İstediğiniz an çalıştırın
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRunNow}
+              disabled={runningNow}
+              className="rounded-lg bg-emerald-600 px-3.5 py-2 text-xs font-semibold text-white shadow hover:bg-emerald-500 disabled:opacity-50"
+            >
+              {runningNow ? "⏳ Başlatılıyor..." : "⚡ Şimdi Analiz Et"}
+            </button>
+            {!demoMode && (
+              <button
+                onClick={() => loadRealData(false)}
+                className="rounded-lg border border-slate-700 bg-pitch-800 px-3 py-2 text-xs font-medium text-slate-200 hover:bg-slate-700"
+              >
+                Yenile
+              </button>
+            )}
+          </div>
         </div>
 
         <PanelContent
@@ -179,6 +218,8 @@ export default function App() {
             const res = await api.triggerSourceCheck();
             setToast(`Canlı kaynak sağlık kontrolü başlatıldı: ${res.job_id}`);
           }}
+          onRunAnalysisNow={handleRunNow}
+          runningNow={runningNow}
           isDemoMode={demoMode}
         />
       </main>

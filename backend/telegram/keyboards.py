@@ -9,6 +9,9 @@ def main_menu_keyboard() -> dict[str, Any]:
     return {
         "inline_keyboard": [
             [
+                {"text": "⚡ Şimdi Analiz Et", "callback_data": "/simdi_analiz"},
+            ],
+            [
                 {"text": "📊 Bugünkü Rapor", "callback_data": "/bugun"},
                 {"text": "📅 Yarın Fikstürü", "callback_data": "/yarin"},
             ],
