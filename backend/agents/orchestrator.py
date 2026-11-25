@@ -19,6 +19,7 @@ from backend.agents.agent_11_math import run_agent_11
 from backend.agents.agent_12_validation import run_agent_12
 from backend.analytics.coverage import compute_data_coverage_score, compute_research_quality_score
 from backend.analytics.market_calculator import compute_all_markets
+from backend.analytics.top_picks import compute_top3_picks
 from backend.schemas import (
     FixtureRecord,
     HistoricalMatch,
@@ -72,6 +73,11 @@ def analyze_single_fixture(
         if markets["over_under_lines"].available
         else None
     )
+    top_picks = compute_top3_picks(
+        markets=markets,
+        probs_1x2=probs,
+        iddaa_odds=fixture.iddaa_odds,
+    )
 
     return MatchPredictionBundle(
         prediction_id=f"pred_{uuid.uuid4().hex[:14]}",
@@ -88,6 +94,7 @@ def analyze_single_fixture(
         data_coverage_score=compute_data_coverage_score(all_agents),
         research_quality_score=compute_research_quality_score(all_agents),
         agent_outputs=all_agents,
+        top_picks=top_picks,
         created_at_utc=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         is_demo=fixture.is_demo,
     )

@@ -5,6 +5,7 @@ import {
   verifySessionRequest,
 } from "./auth";
 import { dispatchGithubWorkflow } from "./github_dispatch";
+import { enrichAndSilentPersist, getIstanbulDates } from "./live_scores";
 import { handleTelegramWebhook } from "./telegram_webhook";
 
 function resolveAllowedOrigin(request: Request, env: Env): string {
@@ -123,17 +124,136 @@ export default {
       if (url.pathname === "/api/fixtures") {
         const rows = await env.DB.prepare(
           `SELECT f.*, mp.prediction_id, mp.prob_home, mp.prob_draw, mp.prob_away,
-                  mp.prob_btts_yes, mp.prob_over_25, mp.data_coverage_score, mp.research_quality_score
+                  mp.prob_btts_yes, mp.prob_over_25, mp.data_coverage_score, mp.research_quality_score,
+                  mp.top_picks_json, mp.is_selected_top15, mp.selection_rank, mp.selection_score,
+                  mr.home_goals AS fin_home_goals, mr.away_goals AS fin_away_goals,
+                  mr.ht_home_goals AS fin_ht_home_goals, mr.ht_away_goals AS fin_ht_away_goals,
+                  mr.outcome_1x2
            FROM fixtures f
            LEFT JOIN match_predictions mp
              ON f.fixture_id = mp.fixture_id
             AND mp.created_at_utc = (
               SELECT MAX(mp2.created_at_utc) FROM match_predictions mp2 WHERE mp2.fixture_id = f.fixture_id
             )
+           LEFT JOIN match_results mr ON f.fixture_id = mr.fixture_id
            WHERE f.is_demo = 0
            ORDER BY f.analysis_day_tr DESC, f.league_name ASC, f.kickoff_tr ASC LIMIT 300`
         ).all();
-        return jsonResponse({ fixtures: rows.results }, 200, origin);
+        const enriched = await enrichAndSilentPersist(env, rows.results || []);
+        return jsonResponse({ fixtures: enriched }, 200, origin);
+      }
+
+      if (url.pathname === "/api/selected-top15") {
+        const reqDay = url.searchParams.get("day");
+        let targetDay = reqDay;
+        if (!targetDay) {
+          const latestDayRow = await env.DB.prepare(
+            "SELECT analysis_day_tr FROM match_predictions WHERE is_demo = 0 AND is_selected_top15 = 1 ORDER BY analysis_day_tr DESC LIMIT 1"
+          ).first<{ analysis_day_tr?: string }>();
+          targetDay = latestDayRow?.analysis_day_tr || getIstanbulDates().todayTr;
+        }
+        const rows = await env.DB.prepare(
+          `SELECT f.*, mp.prediction_id, mp.prob_home, mp.prob_draw, mp.prob_away,
+                  mp.prob_btts_yes, mp.prob_over_25, mp.data_coverage_score, mp.research_quality_score,
+                  mp.top_picks_json, mp.is_selected_top15, mp.selection_rank, mp.selection_score,
+                  mr.home_goals AS fin_home_goals, mr.away_goals AS fin_away_goals,
+                  mr.ht_home_goals AS fin_ht_home_goals, mr.ht_away_goals AS fin_ht_away_goals,
+                  mr.outcome_1x2
+           FROM match_predictions mp
+           JOIN fixtures f ON f.fixture_id = mp.fixture_id
+           LEFT JOIN match_results mr ON f.fixture_id = mr.fixture_id
+           WHERE mp.is_demo = 0
+             AND mp.analysis_day_tr = ?
+             AND mp.is_selected_top15 = 1
+             AND mp.created_at_utc = (
+               SELECT MAX(mp2.created_at_utc) FROM match_predictions mp2 WHERE mp2.fixture_id = f.fixture_id
+             )
+           ORDER BY f.league_name ASC, f.kickoff_tr ASC
+           LIMIT 15`
+        )
+          .bind(targetDay)
+          .all();
+
+        const matches = await enrichAndSilentPersist(env, rows.results || []);
+        let liveCount = 0;
+        let finishedCount = 0;
+        let scheduledCount = 0;
+        let picksWon = 0;
+        let picksLost = 0;
+        let picksLiveWon = 0;
+        let picksLiveLost = 0;
+        let picksPending = 0;
+
+        for (const m of matches) {
+          if (m.effective_status === "live") liveCount += 1;
+          else if (m.effective_status === "finished") finishedCount += 1;
+          else scheduledCount += 1;
+
+          for (const p of m.top_picks || []) {
+            if (p.eval_state === "won") picksWon += 1;
+            else if (p.eval_state === "lost") picksLost += 1;
+            else if (p.eval_state === "live_won") picksLiveWon += 1;
+            else if (p.eval_state === "live_lost") picksLiveLost += 1;
+            else picksPending += 1;
+          }
+        }
+
+        return jsonResponse(
+          {
+            analysis_day_tr: targetDay,
+            summary: {
+              total_matches: matches.length,
+              live_count: liveCount,
+              finished_count: finishedCount,
+              scheduled_count: scheduledCount,
+              picks_won: picksWon,
+              picks_lost: picksLost,
+              picks_live_won: picksLiveWon,
+              picks_live_lost: picksLiveLost,
+              picks_pending: picksPending,
+            },
+            matches,
+          },
+          200,
+          origin
+        );
+      }
+
+      if (url.pathname === "/api/live") {
+        const { todayTr, yesterdayTr } = getIstanbulDates();
+        const rows = await env.DB.prepare(
+          `SELECT f.*, mp.prediction_id, mp.prob_home, mp.prob_draw, mp.prob_away,
+                  mp.prob_btts_yes, mp.prob_over_25, mp.data_coverage_score, mp.research_quality_score,
+                  mp.top_picks_json, mp.is_selected_top15, mp.selection_rank, mp.selection_score,
+                  mr.home_goals AS fin_home_goals, mr.away_goals AS fin_away_goals,
+                  mr.ht_home_goals AS fin_ht_home_goals, mr.ht_away_goals AS fin_ht_away_goals,
+                  mr.outcome_1x2
+           FROM fixtures f
+           JOIN match_predictions mp ON f.fixture_id = mp.fixture_id
+             AND mp.created_at_utc = (
+               SELECT MAX(mp2.created_at_utc) FROM match_predictions mp2 WHERE mp2.fixture_id = f.fixture_id
+             )
+           LEFT JOIN match_results mr ON f.fixture_id = mr.fixture_id
+           WHERE f.is_demo = 0
+             AND (f.analysis_day_tr IN (?, ?) OR f.status = 'live')
+           ORDER BY COALESCE(mp.is_selected_top15, 0) DESC, f.league_name ASC, f.kickoff_tr ASC
+           LIMIT 250`
+        )
+          .bind(todayTr, yesterdayTr)
+          .all();
+
+        const enriched = await enrichAndSilentPersist(env, rows.results || []);
+        const liveMatches = enriched.filter((m) => m.effective_status === "live");
+        const finishedToday = enriched.filter((m) => m.effective_status === "finished");
+        return jsonResponse(
+          {
+            updated_at_utc: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+            live_matches: liveMatches,
+            finished_today: finishedToday,
+          },
+          200,
+          origin
+        );
       }
 
       if (url.pathname === "/api/sources") {

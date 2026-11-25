@@ -281,8 +281,9 @@ class AyzelaRepository:
                 prediction_id, run_id, fixture_id, analysis_day_tr, model_version,
                 prob_home, prob_draw, prob_away, prob_btts_yes, prob_over_25,
                 markets_json, data_coverage_score, research_quality_score,
-                iddaa_verified, is_demo, created_at_utc
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                iddaa_verified, top_picks_json, is_selected_top15, selection_rank, selection_score,
+                is_demo, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 bundle.prediction_id,
@@ -299,8 +300,47 @@ class AyzelaRepository:
                 bundle.data_coverage_score,
                 bundle.research_quality_score,
                 1 if bundle.fixture.iddaa_verified else 0,
+                json.dumps(bundle.top_picks, ensure_ascii=False),
+                1 if bundle.is_selected_top15 else 0,
+                bundle.selection_rank,
+                bundle.selection_score,
                 1 if bundle.is_demo else 0,
                 bundle.created_at_utc,
+            ),
+        )
+
+    def update_fixture_live_score(
+        self,
+        fixture_id: str,
+        status: str,
+        home_goals: int | None,
+        away_goals: int | None,
+        ht_home_goals: int | None = None,
+        ht_away_goals: int | None = None,
+        live_minute: str | None = None,
+        live_status_label: str | None = None,
+    ) -> None:
+        now = utc_now_iso()
+        self.db.execute(
+            """
+            UPDATE fixtures
+            SET status = ?, live_home_goals = ?, live_away_goals = ?,
+                live_ht_home_goals = ?, live_ht_away_goals = ?,
+                live_minute = ?, live_status_label = ?,
+                live_updated_at_utc = ?, updated_at = ?
+            WHERE fixture_id = ?
+            """,
+            (
+                status,
+                home_goals,
+                away_goals,
+                ht_home_goals,
+                ht_away_goals,
+                live_minute,
+                live_status_label,
+                now,
+                now,
+                fixture_id,
             ),
         )
 
@@ -380,8 +420,20 @@ class AyzelaRepository:
             ),
         )
         self.db.execute(
-            "UPDATE fixtures SET status = 'finished', updated_at = ? WHERE fixture_id = ?",
-            (utc_now_iso(), fixture_id),
+            """
+            UPDATE fixtures
+            SET status = 'finished',
+                live_home_goals = ?,
+                live_away_goals = ?,
+                live_ht_home_goals = COALESCE(?, live_ht_home_goals),
+                live_ht_away_goals = COALESCE(?, live_ht_away_goals),
+                live_minute = 'MS',
+                live_status_label = 'MS',
+                live_updated_at_utc = ?,
+                updated_at = ?
+            WHERE fixture_id = ?
+            """,
+            (home_goals, away_goals, ht_home_goals, ht_away_goals, utc_now_iso(), utc_now_iso(), fixture_id),
         )
 
     # --- News ---

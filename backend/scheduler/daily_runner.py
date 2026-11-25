@@ -9,6 +9,7 @@ from typing import Any
 from backend.agents.agent_01_bulletin import filter_and_dedup_bulletin
 from backend.agents.orchestrator import analyze_single_fixture
 from backend.analytics.report_formatter import format_daily_report_tr
+from backend.analytics.top_picks import select_daily_top15
 from backend.collectors.failover_manager import MultiSourceFailoverManager
 from backend.config import ISTANBUL_TZ, get_settings
 from backend.database.repositories import AyzelaRepository
@@ -183,6 +184,8 @@ def run_daily_analysis(
     else:
         bundles = bundles[: settings.daily_max_matches]
 
+    select_daily_top15(bundles, limit=15)
+
     for b in bundles:
         for out in b.agent_outputs:
             if len(bundles) > 20 and settings.db_backend.lower() == "d1" and out.agent_id not in ("agent_01", "agent_11", "agent_12") and out.status == "insufficient_data":
@@ -191,13 +194,14 @@ def run_daily_analysis(
         repo.insert_immutable_prediction(b)
 
     avg_cov = round(sum(b.data_coverage_score for b in bundles) / len(bundles), 4) if bundles else 0.0
+    top15_count = sum(1 for b in bundles if b.is_selected_top15)
     repo.complete_analysis_run(
         run_id=run_id,
         status="completed",
         completed_at_tr=datetime.now(ISTANBUL_TZ).isoformat(),
         matches_analyzed=len(bundles),
         avg_data_coverage=avg_cov,
-        notes_tr=f"{len(candidates)} aday içinden {len(bundles)} maç analiz edildi (gecikme={delay_seconds}s).",
+        notes_tr=f"{len(candidates)} aday içinden {len(bundles)} maç analiz edildi, ilk {top15_count} seçildi (gecikme={delay_seconds}s).",
     )
 
     if run_type == "morning_0800":

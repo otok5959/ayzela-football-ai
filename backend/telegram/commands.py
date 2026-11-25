@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from typing import Any
 
+from backend.analytics.top_picks import evaluate_pick_outcome
 from backend.config import ISTANBUL_TZ, get_settings
 from backend.database.repositories import AyzelaRepository
 from backend.telegram.keyboards import main_menu_keyboard
@@ -13,12 +15,15 @@ from backend.telegram.security import extract_actor_from_update, is_authorized_t
 COMMAND_HELP = [
     ("/start", "Sistemi başlat ve yetkiyi doğrula."),
     ("/menu", "Dokunulabilir ana menüyü aç."),
-    ("/bugun", "Güncel futbol analiz raporu."),
+    ("/bugun", "Seçilen 15 maç ve en yüksek 3 olasılığı."),
+    ("/top15", "Seçilen 15 maçın özetini gösterir."),
+    ("/canli", "Başlamış maçların anlık canlı skoru ve tutma durumu."),
     ("/yarin", "Mevcut ertesi gün fikstürü."),
     ("/analiz", "Takım veya maç adıyla manuel araştırma kuyruğu."),
+    ("/simdi_analiz", "Anlık tam bülten analizi başlat."),
     ("/kadro", "Güncel kesin/muhtemel kadro bilgileri."),
     ("/haberler", "Doğrulanmış futbol haberleri."),
-    ("/sonuclar", "Tamamlanmış karşılaşmalar."),
+    ("/sonuclar", "Tamamlanmış karşılaşmalar ve 🟢/🔴 tutma durumu."),
     ("/gunluk", "Günlük model performansı."),
     ("/haftalik", "Haftalık model performansı."),
     ("/aylik", "Aylık model performansı."),
@@ -66,6 +71,8 @@ class TelegramCommandRouter:
             "/start": self._cmd_start,
             "/menu": self._cmd_menu,
             "/bugun": self._cmd_bugun,
+            "/top15": self._cmd_bugun,
+            "/canli": self._cmd_canli,
             "/yarin": self._cmd_yarin,
             "/analiz": self._cmd_analiz,
             "/simdi_analiz": self._cmd_simdi_analiz,
@@ -112,36 +119,106 @@ class TelegramCommandRouter:
     def _cmd_menu(self, _: str) -> tuple[str, dict]:
         return ("📋 *AyzEla Ana Menü*", main_menu_keyboard())
 
+    def _parse_picks(self, r: dict[str, Any]) -> list[dict[str, Any]]:
+        raw = r.get("top_picks_json")
+        if raw:
+            try:
+                parsed = json.loads(raw) if isinstance(raw, str) else raw
+                if isinstance(parsed, list) and parsed:
+                    return parsed[:3]
+            except Exception:
+                pass
+        return []
+
+    def _format_picks_with_status(self, picks: list[dict[str, Any]], hg: int | None, ag: int | None, st: str) -> str:
+        if not picks:
+            return "-"
+        parts: list[str] = []
+        for p in picks[:3]:
+            ev = evaluate_pick_outcome(str(p.get("key") or ""), hg, ag, st)
+            icon = "🟢" if ev["status"] in ("won", "live_won") else ("🔴" if ev["status"] in ("lost", "live_lost") else "⏳")
+            pct = int(round(float(p.get("probability", 0)) * 100))
+            parts.append(f"{icon} {p.get('label_tr')}: `%{pct}`")
+        return " | ".join(parts)
+
     def _cmd_bugun(self, _: str) -> tuple[str, dict]:
         today_tr = datetime.now(ISTANBUL_TZ).date().isoformat()
         rows = self.repo.db.execute(
             """
             SELECT f.iddaa_match_code, f.home_team_name, f.away_team_name, f.league_name, f.kickoff_tr,
-                   mp.prob_home, mp.prob_draw, mp.prob_away, mp.data_coverage_score, mp.iddaa_verified
+                   f.status, f.live_home_goals, f.live_away_goals, f.live_minute,
+                   mr.home_goals AS fin_home_goals, mr.away_goals AS fin_away_goals,
+                   mp.prob_home, mp.prob_draw, mp.prob_away, mp.data_coverage_score,
+                   mp.top_picks_json, mp.is_selected_top15, mp.iddaa_verified
             FROM match_predictions mp
             JOIN fixtures f ON mp.fixture_id = f.fixture_id
+            LEFT JOIN match_results mr ON f.fixture_id = mr.fixture_id
             WHERE mp.analysis_day_tr = ? AND mp.is_demo = 0
               AND mp.created_at_utc = (
                 SELECT MAX(mp2.created_at_utc) FROM match_predictions mp2 WHERE mp2.fixture_id = mp.fixture_id
               )
-            ORDER BY f.league_name ASC, f.kickoff_tr ASC
-            LIMIT 30
+            ORDER BY mp.is_selected_top15 DESC, f.league_name ASC, f.kickoff_tr ASC
+            LIMIT 15
             """,
             (today_tr,),
         )
         if not rows:
             return (f"📅 `{today_tr}` için henüz kayıtlı günlük analiz yok.", main_menu_keyboard())
-        lines = [f"📊 *Bugünkü Analizler ({today_tr})*"]
+        top15_only = [r for r in rows if r.get("is_selected_top15")] or rows
+        top15_only.sort(key=lambda r: (r["league_name"], r["kickoff_tr"]))
+        lines = [f"🎯 *Günün Seçilen {len(top15_only)} Maçı ({today_tr})*"]
         cur_lg = None
-        for i, r in enumerate(rows, 1):
+        for i, r in enumerate(top15_only, 1):
             if r["league_name"] != cur_lg:
                 cur_lg = r["league_name"]
                 lines.append(f"\n🏆 *{cur_lg}*")
             code = r.get("iddaa_match_code") or "-"
-            badge = "✅" if r["iddaa_verified"] else "⚠️"
+            fin = r.get("fin_home_goals") is not None
+            st = "finished" if fin else (r.get("status") or "scheduled")
+            hg = r.get("fin_home_goals") if fin else r.get("live_home_goals")
+            ag = r.get("fin_away_goals") if fin else r.get("live_away_goals")
+            score_tag = f" | Skor: *{hg}-{ag}*" if hg is not None and ag is not None else ""
+            picks = self._parse_picks(r)
+            picks_txt = (
+                self._format_picks_with_status(picks, hg, ag, st)
+                if picks
+                else f"1-X-2: `%{int(r['prob_home']*100)}/%{int(r['prob_draw']*100)}/%{int(r['prob_away']*100)}`"
+            )
             lines.append(
-                f"{i}. `[Kod: {code}]` *{r['home_team_name']} - {r['away_team_name']}* ({r['kickoff_tr'][11:16]})\n"
-                f"   1-X-2: `%{int(r['prob_home']*100)}/%{int(r['prob_draw']*100)}/%{int(r['prob_away']*100)}` | Veri: `%{int(r['data_coverage_score']*100)}` {badge}"
+                f"{i}. `[Kod: {code}]` *{r['home_team_name']} - {r['away_team_name']}* ({r['kickoff_tr'][11:16]}{score_tag})\n"
+                f"   {picks_txt}"
+            )
+        return ("\n".join(lines), main_menu_keyboard())
+
+    def _cmd_canli(self, _: str) -> tuple[str, dict]:
+        rows = self.repo.db.execute(
+            """
+            SELECT f.iddaa_match_code, f.home_team_name, f.away_team_name, f.league_name,
+                   f.live_home_goals, f.live_away_goals, f.live_minute, mp.top_picks_json, mp.is_selected_top15
+            FROM fixtures f
+            JOIN match_predictions mp ON mp.fixture_id = f.fixture_id
+              AND mp.created_at_utc = (
+                SELECT MAX(mp2.created_at_utc) FROM match_predictions mp2 WHERE mp2.fixture_id = f.fixture_id
+              )
+            WHERE f.status = 'live' AND f.is_demo = 0
+            ORDER BY mp.is_selected_top15 DESC, f.league_name ASC, f.kickoff_tr ASC
+            LIMIT 20
+            """
+        )
+        if not rows:
+            return ("🔴 Şu anda devam eden canlı maç görünmüyor.", main_menu_keyboard())
+        lines = [f"🔴 *Başlamış / Canlı Maçlar ({len(rows)})*"]
+        for r in rows:
+            code = r.get("iddaa_match_code") or "-"
+            hg = r.get("live_home_goals")
+            ag = r.get("live_away_goals")
+            minute = r.get("live_minute") or "Canlı"
+            score_txt = f"{hg}-{ag}" if hg is not None and ag is not None else "0-0"
+            star = "⭐ " if r.get("is_selected_top15") else ""
+            picks_txt = self._format_picks_with_status(self._parse_picks(r), hg, ag, "live")
+            lines.append(
+                f"{star}`[Kod: {code}]` *{r['home_team_name']} {score_txt} {r['away_team_name']}* ({minute})\n"
+                f"   {picks_txt}"
             )
         return ("\n".join(lines), main_menu_keyboard())
 
@@ -220,18 +297,35 @@ class TelegramCommandRouter:
     def _cmd_sonuclar(self, _: str) -> tuple[str, dict]:
         rows = self.repo.db.execute(
             """
-            SELECT f.home_team_name, f.away_team_name, mr.home_goals, mr.away_goals, mr.outcome_1x2
+            SELECT f.iddaa_match_code, f.home_team_name, f.away_team_name,
+                   mr.home_goals, mr.away_goals, mr.outcome_1x2,
+                   mp.top_picks_json, mp.is_selected_top15
             FROM match_results mr
             JOIN fixtures f ON mr.fixture_id = f.fixture_id
+            LEFT JOIN match_predictions mp ON mp.fixture_id = f.fixture_id
+              AND mp.created_at_utc = (
+                SELECT MAX(mp2.created_at_utc) FROM match_predictions mp2 WHERE mp2.fixture_id = f.fixture_id
+              )
             WHERE mr.is_demo = 0
-            ORDER BY mr.recorded_at DESC LIMIT 15
+            ORDER BY mp.is_selected_top15 DESC, mr.recorded_at DESC LIMIT 15
             """
         )
         if not rows:
             return ("🏁 Henüz tamamlanmış maç sonucu kaydedilmedi.", main_menu_keyboard())
         lines = ["🏁 *Son Tamamlanan Karşılaşmalar*"]
         for r in rows:
-            lines.append(f"- {r['home_team_name']} *{r['home_goals']}-{r['away_goals']}* {r['away_team_name']} ({r['outcome_1x2']})")
+            code = r.get("iddaa_match_code") or "-"
+            star = "⭐ " if r.get("is_selected_top15") else ""
+            picks_txt = self._format_picks_with_status(
+                self._parse_picks(r),
+                int(r["home_goals"]),
+                int(r["away_goals"]),
+                "finished",
+            )
+            lines.append(
+                f"{star}`[Kod: {code}]` *{r['home_team_name']} {r['home_goals']}-{r['away_goals']} {r['away_team_name']}*\n"
+                f"   {picks_txt}"
+            )
         return ("\n".join(lines), main_menu_keyboard())
 
     def _cmd_perf(self, period_type: str, label: str) -> tuple[str, dict]:

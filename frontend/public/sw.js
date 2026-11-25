@@ -1,4 +1,4 @@
-const CACHE_NAME = "ayzela-shell-v2";
+const CACHE_NAME = "ayzela-shell-v3";
 const SHELL_ASSETS = ["/manifest.webmanifest", "/icon.svg"];
 
 self.addEventListener("install", (event) => {

@@ -13,6 +13,16 @@ from backend.validation.league_filter import LeagueFilter
 
 IDDAA_EVENTS_URL = "https://sportsbookv2.iddaa.com/sportsbook/events?st=1&type=0&version=0"
 IDDAA_COMPS_URL = "https://sportsbookv2.iddaa.com/sportsbook/competitions"
+IDDAA_LIVE_RESULTS_URL = "https://statisticsv2.iddaa.com/live-results?sportId=1&date={date}"
+
+_LIVE_STATUS_LABELS = {
+    2: "1. Yarı",
+    3: "2. Yarı",
+    5: "Devre Arası",
+    6: "MS",
+    7: "Uzatma",
+    12: "Penaltılar",
+}
 
 MARKET_TYPE_LABELS = {
     1: "Maç Sonucu (1X2)",
@@ -150,10 +160,24 @@ class IddaaProvider(BaseProvider):
                             "draw": outcomes["0"],
                             "away": outcomes["2"],
                         }
+                    elif t == 2 and st == 101 and sov == "1.5" and {"Alt", "Üst"}.issubset(outcomes):
+                        iddaa_odds["ou_15"] = {"under": outcomes["Alt"], "over": outcomes["Üst"]}
                     elif t == 2 and st == 101 and sov == "2.5" and {"Alt", "Üst"}.issubset(outcomes):
                         iddaa_odds["ou_25"] = {"under": outcomes["Alt"], "over": outcomes["Üst"]}
+                    elif t == 2 and st == 101 and sov == "3.5" and {"Alt", "Üst"}.issubset(outcomes):
+                        iddaa_odds["ou_35"] = {"under": outcomes["Alt"], "over": outcomes["Üst"]}
                     elif t == 2 and st == 89 and {"Var", "Yok"}.issubset(outcomes):
                         iddaa_odds["btts"] = {"yes": outcomes["Var"], "no": outcomes["Yok"]}
+                    elif t == 2 and st == 92:
+                        dc_map: dict[str, float] = {}
+                        if "1 ve 0" in outcomes:
+                            dc_map["1x"] = outcomes["1 ve 0"]
+                        if "0 ve 2" in outcomes:
+                            dc_map["x2"] = outcomes["0 ve 2"]
+                        if "1 ve 2" in outcomes:
+                            dc_map["12"] = outcomes["1 ve 2"]
+                        if dc_map:
+                            iddaa_odds["dc"] = dc_map
 
                 event_id = str(ev["i"])
                 match_code = str(ev.get("bri") or event_id)
@@ -193,3 +217,81 @@ class IddaaProvider(BaseProvider):
                 # Isolate malformed individual event rows without crashing pipeline
                 continue
         return fixtures
+
+    def fetch_live_and_finished_scores(self, dates: list[str]) -> dict[str, dict[str, Any]]:
+        """
+        Fetch real-time live and finished football match scores from iddaa statistics API
+        for the given YYYY-MM-DD dates. Keyed by iddaa_event_id string.
+        """
+        ensure_free_only_allowed(self.requires_payment, self.source_name)
+        out: dict[str, dict[str, Any]] = {}
+        seen_dates: list[str] = []
+        for dt in dates:
+            if dt and dt not in seen_dates:
+                seen_dates.append(dt)
+
+        for dt in seen_dates:
+            url = IDDAA_LIVE_RESULTS_URL.format(date=dt)
+            try:
+                payload, _, _, fetched_at = self.http.get_json(url, ttl_seconds=20)
+            except Exception:
+                continue
+            if not payload.get("isSuccess"):
+                continue
+            data = payload.get("data") or {}
+            events = data.get("events") or []
+            sc_map = data.get("sc") or {}
+            if not isinstance(events, list) or not isinstance(sc_map, dict):
+                continue
+
+            for ev in events:
+                eid = str(ev.get("eventId") or "")
+                if not eid:
+                    continue
+                phase = ev.get("phase")
+                sc = sc_map.get(eid)
+                if phase == 1:
+                    status = "live"
+                elif phase == 2:
+                    status = "finished"
+                else:
+                    status = "scheduled"
+
+                ht = sc.get("ht") if isinstance(sc, dict) and isinstance(sc.get("ht"), dict) else {}
+                at = sc.get("at") if isinstance(sc, dict) and isinstance(sc.get("at"), dict) else {}
+                sc_s = sc.get("s") if isinstance(sc, dict) else None
+                raw_min = sc.get("min") if isinstance(sc, dict) else None
+
+                home_goals = ht.get("r")
+                away_goals = at.get("r")
+                ht_home_goals = ht.get("ht")
+                ht_away_goals = at.get("ht")
+
+                if status == "finished":
+                    minute = "MS"
+                    status_label = _LIVE_STATUS_LABELS.get(sc_s, "MS")
+                elif sc_s == 5:
+                    minute = "İY"
+                    status_label = "Devre Arası"
+                elif status == "live" and raw_min is not None:
+                    minute = f"{raw_min}'"
+                    status_label = _LIVE_STATUS_LABELS.get(sc_s, "Canlı")
+                else:
+                    minute = None
+                    status_label = _LIVE_STATUS_LABELS.get(sc_s, "Başlamadı")
+
+                out[eid] = {
+                    "event_id": eid,
+                    "fixture_id": f"iddaa_{eid}",
+                    "betradar_id": str(ev.get("betradarId") or ""),
+                    "status": status,
+                    "home_goals": int(home_goals) if home_goals is not None else None,
+                    "away_goals": int(away_goals) if away_goals is not None else None,
+                    "ht_home_goals": int(ht_home_goals) if ht_home_goals is not None else None,
+                    "ht_away_goals": int(ht_away_goals) if ht_away_goals is not None else None,
+                    "minute": minute,
+                    "status_label": status_label,
+                    "source_url": url,
+                    "fetched_at": fetched_at,
+                }
+        return out

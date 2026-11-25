@@ -21,13 +21,13 @@ class CloudflareD1Client:
             "Authorization": f"Bearer {api_token}",
             "Content-Type": "application/json",
         }
+        self._client = httpx.Client(timeout=25.0)
 
     def execute(self, sql: str, params: tuple[Any, ...] | list[Any] = ()) -> list[dict[str, Any]]:
         payload = {"sql": sql, "params": list(params)}
-        with httpx.Client(timeout=20.0) as client:
-            resp = client.post(self.url, headers=self.headers, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
+        resp = self._client.post(self.url, headers=self.headers, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
         if not data.get("success"):
             raise RuntimeError(f"Cloudflare D1 hatası: {data.get('errors')}")
         results = data.get("result", [])
@@ -45,3 +45,6 @@ class CloudflareD1Client:
             if stmt.upper().startswith("PRAGMA "):
                 continue
             self.execute(stmt)
+
+    def close(self) -> None:
+        self._client.close()

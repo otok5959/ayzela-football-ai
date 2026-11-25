@@ -14,6 +14,7 @@ from backend.config import get_settings
 from backend.database.client import get_db_client
 from backend.database.repositories import AyzelaRepository
 from backend.scheduler.daily_runner import run_daily_analysis
+from backend.scheduler.results_sync import sync_results_and_compute_metrics
 from backend.telegram.bot_client import TelegramBotClient
 
 
@@ -64,7 +65,13 @@ def main() -> None:
                     )
         else:
             repo.update_job_status(job["job_id"], "completed", "İşlendi")
-    print(f"Kuyruk kontrolü tamamlandı: {len(queued)} iş işlendi.")
+
+    # Silent live & finished score sync (never sends Telegram alerts)
+    sync_summary = sync_results_and_compute_metrics(repo=repo, failover=failover)
+    print(
+        f"Kuyruk kontrolü tamamlandı: {len(queued)} iş işlendi. "
+        f"Sessiz skor güncelleme: {sync_summary.get('synced_results', 0)} biten maç."
+    )
 
 
 if __name__ == "__main__":

@@ -144,7 +144,9 @@ def test_morning_0800_and_independent_1159_and_full_bulletin(temp_repo):
     assert res_morning["status"] == "completed"
     assert res_morning["delay_seconds"] == 180
     assert len(res_morning["bundles"]) == 18
-    assert "[Kod: 2000]" in res_morning["report_text"]
+    assert sum(1 for b in res_morning["bundles"] if b.is_selected_top15) == 15
+    assert "[Kod: 20" in res_morning["report_text"]
+    assert "Seçilen: 15 maç" in res_morning["report_text"]
     assert "🏆 *İngiltere Premier League" in res_morning["report_text"]
 
     # Independent 11:59 run recalculates with fresh run_id and new predictions

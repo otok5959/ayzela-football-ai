@@ -12,23 +12,15 @@ def main_menu_keyboard() -> dict[str, Any]:
                 {"text": "⚡ Şimdi Analiz Et", "callback_data": "/simdi_analiz"},
             ],
             [
-                {"text": "📊 Bugünkü Rapor", "callback_data": "/bugun"},
-                {"text": "📅 Yarın Fikstürü", "callback_data": "/yarin"},
-            ],
-            [
-                {"text": "👥 Kadrolar", "callback_data": "/kadro"},
-                {"text": "📰 Futbol Haberleri", "callback_data": "/haberler"},
+                {"text": "🎯 Seçilen 15 Maç", "callback_data": "/bugun"},
+                {"text": "🔴 Canlı Sonuçlar", "callback_data": "/canli"},
             ],
             [
                 {"text": "🏁 Sonuçlar", "callback_data": "/sonuclar"},
-                {"text": "📈 Performans", "callback_data": "/gunluk"},
+                {"text": "📅 Yarın Fikstürü", "callback_data": "/yarin"},
             ],
             [
-                {"text": "🏆 Aktif Ligler", "callback_data": "/ligler"},
                 {"text": "🩺 Kaynak Sağlığı", "callback_data": "/kaynaklar"},
-            ],
-            [
-                {"text": "⚙️ Sistem Durumu", "callback_data": "/durum"},
                 {"text": "🖥️ Web Panel", "callback_data": "/panel"},
             ],
         ]

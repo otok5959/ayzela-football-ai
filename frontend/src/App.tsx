@@ -1,9 +1,18 @@
 import React, { useEffect, useState } from "react";
 import { PANEL_SECTIONS, PanelContent, PanelTabId } from "./pages/AllSections";
-import { api, FixtureRow, ISOLATED_DEMO_PREVIEW, LeagueRow, SourceHealthRow, UsageLimitRow } from "./services/api";
+import {
+  api,
+  FixtureRow,
+  ISOLATED_DEMO_PREVIEW,
+  LeagueRow,
+  LiveResponse,
+  SourceHealthRow,
+  Top15Response,
+  UsageLimitRow,
+} from "./services/api";
 
 export default function App() {
-  const [tab, setTab] = useState<PanelTabId>("dashboard");
+  const [tab, setTab] = useState<PanelTabId>("top15");
   const [authenticated, setAuthenticated] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
   const [username, setUsername] = useState("ayzela_admin");
@@ -11,24 +20,42 @@ export default function App() {
   const [authError, setAuthError] = useState("");
   const [toast, setToast] = useState("");
   const [runningNow, setRunningNow] = useState(false);
+  const [autoRefreshLive, setAutoRefreshLive] = useState(true);
 
   const [fixtures, setFixtures] = useState<FixtureRow[]>([]);
+  const [top15Data, setTop15Data] = useState<Top15Response | null>(null);
+  const [liveData, setLiveData] = useState<LiveResponse | null>(null);
   const [sources, setSources] = useState<SourceHealthRow[]>([]);
   const [leagues, setLeagues] = useState<LeagueRow[]>([]);
   const [limits, setLimits] = useState<UsageLimitRow[]>([]);
   const [logs, setLogs] = useState<any[]>([]);
   const [selectedFixture, setSelectedFixture] = useState<FixtureRow | null>(null);
 
+  async function refreshLiveAndTop15() {
+    if (demoMode) return;
+    try {
+      const [t15, lv] = await Promise.all([api.selectedTop15(), api.live()]);
+      setTop15Data(t15);
+      setLiveData(lv);
+    } catch {
+      // Silent retry on next cycle
+    }
+  }
+
   async function loadRealData(throwOnAuthFail = false) {
     try {
-      const [dash, fx, src, lgs, lgRows] = await Promise.all([
+      const [dash, fx, t15, lv, src, lgs, lgRows] = await Promise.all([
         api.dashboard(),
         api.fixtures(),
+        api.selectedTop15(),
+        api.live(),
         api.sources(),
         api.leagues(),
         api.logs(),
       ]);
       setFixtures(fx.fixtures || []);
+      setTop15Data(t15);
+      setLiveData(lv);
       setSources(src.sources || []);
       setLeagues(lgs.leagues || []);
       setLimits(dash.usage_limits || []);
@@ -45,10 +72,39 @@ export default function App() {
     loadRealData(false);
   }, []);
 
+  useEffect(() => {
+    if (!authenticated || demoMode || !autoRefreshLive) return;
+    if (tab !== "live" && tab !== "top15" && tab !== "results") return;
+    const id = window.setInterval(() => {
+      refreshLiveAndTop15();
+    }, 30_000);
+    return () => window.clearInterval(id);
+  }, [authenticated, demoMode, autoRefreshLive, tab]);
+
   function enterDemoPreview() {
     setDemoMode(true);
     setAuthenticated(true);
     setFixtures(ISOLATED_DEMO_PREVIEW.fixtures);
+    setTop15Data({
+      analysis_day_tr: "2026-11-25",
+      summary: {
+        total_matches: 1,
+        live_count: 0,
+        finished_count: 1,
+        scheduled_count: 0,
+        picks_won: 2,
+        picks_lost: 1,
+        picks_live_won: 0,
+        picks_live_lost: 0,
+        picks_pending: 0,
+      },
+      matches: ISOLATED_DEMO_PREVIEW.fixtures,
+    });
+    setLiveData({
+      updated_at_utc: "2026-11-25T11:30:00Z",
+      live_matches: [],
+      finished_today: ISOLATED_DEMO_PREVIEW.fixtures,
+    });
     setSources(ISOLATED_DEMO_PREVIEW.sources);
     setLimits(ISOLATED_DEMO_PREVIEW.usageLimits);
     setLeagues([
@@ -77,7 +133,7 @@ export default function App() {
     setRunningNow(true);
     try {
       const res = await api.runAnalysisNow();
-      setToast(`⚡ Anlık analiz başlatıldı (İş: ${res.job_id}). 1-2 dakika içinde Telegram'a ve panele düşecektir.`);
+      setToast(`⚡ Anlık analiz başlatıldı (İş: ${res.job_id}). Tüm bülten taranıp Seçilen 15 Maç hazırlanacaktır.`);
     } catch (err: any) {
       setToast(`⚠️ Anlık analiz başlatılamadı: ${err.message || "Bilinmeyen hata"}`);
     } finally {
@@ -169,7 +225,7 @@ export default function App() {
               ))}
             </select>
             <div className="hidden text-xs text-slate-400 md:block">
-              Sabit analiz: 08:00 & 11:59 TRT • İstediğiniz an çalıştırın
+              Sabit analiz: 08:00 & 11:59 TRT • Seçilen 15 Maç & Canlı Sonuç Takibi
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -194,6 +250,8 @@ export default function App() {
         <PanelContent
           tab={tab}
           fixtures={fixtures}
+          top15Data={top15Data}
+          liveData={liveData}
           sources={sources}
           leagues={leagues}
           limits={limits}
@@ -219,13 +277,16 @@ export default function App() {
             setToast(`Canlı kaynak sağlık kontrolü başlatıldı: ${res.job_id}`);
           }}
           onRunAnalysisNow={handleRunNow}
+          onRefreshScores={refreshLiveAndTop15}
+          autoRefreshLive={autoRefreshLive}
+          onToggleAutoRefreshLive={() => setAutoRefreshLive((v) => !v)}
           runningNow={runningNow}
           isDemoMode={demoMode}
         />
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 flex justify-around border-t border-slate-800 bg-pitch-950 py-2 md:hidden">
-        {(["dashboard", "fixtures", "sources", "limits", "research"] as PanelTabId[]).map((id) => {
+        {(["top15", "live", "fixtures", "results", "dashboard"] as PanelTabId[]).map((id) => {
           const item = PANEL_SECTIONS.find((s) => s.id === id)!;
           return (
             <button

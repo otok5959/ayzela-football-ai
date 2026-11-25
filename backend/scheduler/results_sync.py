@@ -29,7 +29,56 @@ def sync_results_and_compute_metrics(
 
     history_by_org: dict[str, list[HistoricalMatch]] = {}
     synced_count = 0
+
+    # Primary silent score sync from iddaa.com live-results API (live + finished)
+    ref_dates: list[str] = []
+    now_tr = datetime.now(ISTANBUL_TZ)
+    for delta in (0, -1):
+        d = (now_tr.date() + timedelta(days=delta)).isoformat()
+        if d not in ref_dates:
+            ref_dates.append(d)
     for fx in pending_fixtures:
+        kd = str(fx.get("kickoff_tr") or fx.get("analysis_day_tr") or "")[:10]
+        if kd and kd not in ref_dates:
+            ref_dates.append(kd)
+
+    iddaa_scores: dict[str, dict[str, Any]] = {}
+    try:
+        iddaa_scores = failover.iddaa.fetch_live_and_finished_scores(ref_dates)
+    except Exception:
+        iddaa_scores = {}
+
+    remaining_fixtures: list[dict[str, Any]] = []
+    for fx in pending_fixtures:
+        eid = str(fx.get("iddaa_event_id") or "")
+        sc = iddaa_scores.get(eid) if eid else None
+        if sc and sc.get("status") == "finished" and sc.get("home_goals") is not None and sc.get("away_goals") is not None:
+            repo.upsert_match_result(
+                fixture_id=fx["fixture_id"],
+                home_goals=int(sc["home_goals"]),
+                away_goals=int(sc["away_goals"]),
+                ht_home_goals=sc.get("ht_home_goals"),
+                ht_away_goals=sc.get("ht_away_goals"),
+                source_name="İddaa.com Canlı Sonuçlar",
+                source_url=sc.get("source_url") or "https://statisticsv2.iddaa.com/live-results",
+                is_demo=False,
+            )
+            synced_count += 1
+        else:
+            if sc and sc.get("status") == "live" and sc.get("home_goals") is not None and sc.get("away_goals") is not None:
+                repo.update_fixture_live_score(
+                    fixture_id=fx["fixture_id"],
+                    status="live",
+                    home_goals=int(sc["home_goals"]),
+                    away_goals=int(sc["away_goals"]),
+                    ht_home_goals=sc.get("ht_home_goals"),
+                    ht_away_goals=sc.get("ht_away_goals"),
+                    live_minute=sc.get("minute"),
+                    live_status_label=sc.get("status_label"),
+                )
+            remaining_fixtures.append(fx)
+
+    for fx in remaining_fixtures:
         org_id = fx["organization_id"]
         if org_id not in history_by_org:
             history_by_org[org_id] = failover.fetch_historical_for_league(org_id)

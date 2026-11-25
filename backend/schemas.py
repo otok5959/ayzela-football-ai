@@ -135,5 +135,9 @@ class MatchPredictionBundle(BaseModel):
     data_coverage_score: float = Field(ge=0.0, le=1.0)
     research_quality_score: float = Field(ge=0.0, le=1.0)
     agent_outputs: list[AgentOutput] = Field(default_factory=list)
+    top_picks: list[dict[str, Any]] = Field(default_factory=list)
+    is_selected_top15: bool = False
+    selection_rank: int | None = None
+    selection_score: float | None = None
     created_at_utc: str
     is_demo: bool = False

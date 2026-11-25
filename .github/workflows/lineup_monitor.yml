@@ -2,7 +2,9 @@ name: AyzEla Kadro ve Kuyruk Takibi
 
 on:
   schedule:
-    - cron: '*/30 9-21 * * *'
+    # Her 30 dakikada canlı/biten skor ve kuyruk senkronizasyonu (sessiz DB güncellemesi)
+    - cron: '*/30 9-23 * * *'
+    - cron: '0 0-3 * * *'
   workflow_dispatch:
 
 jobs:

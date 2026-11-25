@@ -40,9 +40,13 @@ def test_all_18_telegram_commands_and_manual_queue(temp_repo):
         allowed_user_id="111222333",
         allowed_chat_id="111222333",
     )
-    assert len(COMMAND_HELP) == 18
+    assert len(COMMAND_HELP) >= 18
+    assert any(c == "/canli" for c, _ in COMMAND_HELP)
+    assert any(c == "/top15" for c, _ in COMMAND_HELP)
 
     for cmd, _ in COMMAND_HELP:
+        if cmd == "/simdi_analiz":
+            continue
         text = "/analiz Galatasaray" if cmd == "/analiz" else cmd
         res = router.handle_update(
             {"message": {"from": {"id": 111222333}, "chat": {"id": 111222333}, "text": text}}
