@@ -18,5 +18,5 @@ GITHUB_REPOSITORY = "otok5959/ayzela-football-ai"
 [[d1_databases]]
 binding = "DB"
 database_name = "ayzela-football-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "ba521b11-ea1e-474f-a527-2f454d91b19a"
 migrations_dir = "../migrations"

@@ -10,14 +10,15 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from backend.collectors.failover_manager import MultiSourceFailoverManager
 from backend.config import get_settings
+from backend.database.client import get_db_client
 from backend.database.repositories import AyzelaRepository
-from backend.database.sqlite_backend import SQLiteClient
 
 
 def main() -> None:
     settings = get_settings()
-    db = SQLiteClient(settings.sqlite_db_path)
-    db.init_schema(settings.migrations_dir)
+    db = get_db_client()
+    if settings.db_backend.lower() == "sqlite":
+        db.init_schema(settings.migrations_dir)
     repo = AyzelaRepository(db)
     mgr = MultiSourceFailoverManager(repo=repo)
 
