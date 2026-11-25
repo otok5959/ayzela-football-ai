@@ -56,11 +56,14 @@ export interface UsageLimitRow {
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+const TOKEN_STORAGE_KEY = "ayzela_session_token";
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = sessionStorage.getItem(TOKEN_STORAGE_KEY);
+  const authHeaders: Record<string, string> = token ? { Authorization: `Bearer ${token}` } : {};
   const resp = await fetch(`${API_BASE}${path}`, {
     credentials: "include",
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    headers: { "Content-Type": "application/json", ...authHeaders, ...(init?.headers || {}) },
     ...init,
   });
   if (!resp.ok) {
@@ -71,12 +74,20 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  login: (username: string, password: string) =>
-    requestJson<{ ok: boolean; username: string }>("/api/auth/login", {
+  login: async (username: string, password: string) => {
+    const res = await requestJson<{ ok: boolean; username: string; token?: string }>("/api/auth/login", {
       method: "POST",
-      body: JSON.stringify({ username, password }),
-    }),
-  logout: () => requestJson<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+      body: JSON.stringify({ username: username.trim(), password: password.trim() }),
+    });
+    if (res.token) {
+      sessionStorage.setItem(TOKEN_STORAGE_KEY, res.token);
+    }
+    return res;
+  },
+  logout: async () => {
+    sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    return requestJson<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
+  },
   dashboard: () => requestJson<any>("/api/dashboard"),
   fixtures: () => requestJson<{ fixtures: FixtureRow[] }>("/api/fixtures"),
   sources: () => requestJson<{ sources: SourceHealthRow[] }>("/api/sources"),

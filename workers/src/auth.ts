@@ -66,15 +66,25 @@ export async function createSessionToken(username: string, secret: string, ttlSe
   return `${payload}.${sig}`;
 }
 
-export async function verifySessionCookie(request: Request, secret: string): Promise<string | null> {
-  const cookieHeader = request.headers.get("Cookie") || "";
-  const match = cookieHeader.match(/(?:^|;\s*)ayzela_session=([^;]+)/);
-  if (!match) return null;
-  const token = decodeURIComponent(match[1]);
+export async function verifySessionToken(token: string, secret: string): Promise<string | null> {
+  if (!token || !secret) return null;
   const parts = token.split(".");
   if (parts.length !== 3) return null;
   const [username, expStr, sig] = parts;
   if (Number(expStr) < Math.floor(Date.now() / 1000)) return null;
   const expected = await hmacSign(secret, `${username}.${expStr}`);
   return timingSafeEqual(sig, expected) ? username : null;
+}
+
+export async function verifySessionRequest(request: Request, secret: string): Promise<string | null> {
+  const authHeader = request.headers.get("Authorization") || "";
+  if (authHeader.startsWith("Bearer ")) {
+    const bearer = authHeader.slice(7).trim();
+    const userFromBearer = await verifySessionToken(bearer, secret);
+    if (userFromBearer) return userFromBearer;
+  }
+  const cookieHeader = request.headers.get("Cookie") || "";
+  const match = cookieHeader.match(/(?:^|;\s*)ayzela_session=([^;]+)/);
+  if (!match) return null;
+  return verifySessionToken(decodeURIComponent(match[1]), secret);
 }

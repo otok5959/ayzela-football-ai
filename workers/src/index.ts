@@ -2,10 +2,23 @@ import {
   Env,
   createSessionToken,
   verifyPbkdf2Password,
-  verifySessionCookie,
+  verifySessionRequest,
 } from "./auth";
 import { dispatchGithubWorkflow } from "./github_dispatch";
 import { handleTelegramWebhook } from "./telegram_webhook";
+
+function resolveAllowedOrigin(request: Request, env: Env): string {
+  const reqOrigin = request.headers.get("Origin") || "";
+  const primary = env.PANEL_ORIGIN || "https://ayzela-panel.pages.dev";
+  if (
+    reqOrigin === primary ||
+    /^https:\/\/[a-z0-9-]+\.ayzela-panel\.pages\.dev$/.test(reqOrigin) ||
+    reqOrigin === "http://localhost:5173"
+  ) {
+    return reqOrigin;
+  }
+  return primary;
+}
 
 function jsonResponse(data: unknown, status = 200, origin = "*", extraHeaders: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(data), {
@@ -15,7 +28,8 @@ function jsonResponse(data: unknown, status = 200, origin = "*", extraHeaders: R
       "Access-Control-Allow-Origin": origin,
       "Access-Control-Allow-Credentials": "true",
       "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Vary": "Origin",
       "X-Content-Type-Options": "nosniff",
       "X-Frame-Options": "DENY",
       ...extraHeaders,
@@ -26,7 +40,7 @@ function jsonResponse(data: unknown, status = 200, origin = "*", extraHeaders: R
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
-    const origin = env.PANEL_ORIGIN || "*";
+    const origin = resolveAllowedOrigin(request, env);
 
     if (request.method === "OPTIONS") {
       return new Response(null, {
@@ -35,7 +49,8 @@ export default {
           "Access-Control-Allow-Origin": origin,
           "Access-Control-Allow-Credentials": "true",
           "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type",
+          "Access-Control-Allow-Headers": "Content-Type, Authorization",
+          "Vary": "Origin",
         },
       });
     }
@@ -58,11 +73,11 @@ export default {
       }
       const token = await createSessionToken(body.username!, env.ADMIN_SESSION_SECRET);
       return jsonResponse(
-        { ok: true, username: body.username },
+        { ok: true, username: body.username, token },
         200,
         origin,
         {
-          "Set-Cookie": `ayzela_session=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=604800`,
+          "Set-Cookie": `ayzela_session=${encodeURIComponent(token)}; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=604800`,
         }
       );
     }
@@ -72,13 +87,13 @@ export default {
         { ok: true },
         200,
         origin,
-        { "Set-Cookie": "ayzela_session=; HttpOnly; Secure; SameSite=Strict; Path=/; Max-Age=0" }
+        { "Set-Cookie": "ayzela_session=; HttpOnly; Secure; SameSite=None; Partitioned; Path=/; Max-Age=0" }
       );
     }
 
     // Require authenticated session for all /api/* routes below
     if (url.pathname.startsWith("/api/")) {
-      const user = await verifySessionCookie(request, env.ADMIN_SESSION_SECRET || "");
+      const user = await verifySessionRequest(request, env.ADMIN_SESSION_SECRET || "");
       if (!user) {
         return jsonResponse({ error: "Yetkisiz erişim. Lütfen giriş yapın." }, 401, origin);
       }

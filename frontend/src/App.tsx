@@ -18,7 +18,7 @@ export default function App() {
   const [logs, setLogs] = useState<any[]>([]);
   const [selectedFixture, setSelectedFixture] = useState<FixtureRow | null>(null);
 
-  async function loadRealData() {
+  async function loadRealData(throwOnAuthFail = false) {
     try {
       const [dash, fx, src, lgs, lgRows] = await Promise.all([
         api.dashboard(),
@@ -34,13 +34,14 @@ export default function App() {
       setLogs(lgRows.logs || []);
       setAuthenticated(true);
       setDemoMode(false);
-    } catch {
+    } catch (err) {
       setAuthenticated(false);
+      if (throwOnAuthFail) throw err;
     }
   }
 
   useEffect(() => {
-    loadRealData();
+    loadRealData(false);
   }, []);
 
   function enterDemoPreview() {
@@ -61,7 +62,7 @@ export default function App() {
     setAuthError("");
     try {
       await api.login(username, password);
-      await loadRealData();
+      await loadRealData(true);
     } catch (err: any) {
       setAuthError(err.message || "Giriş başarısız");
     }
