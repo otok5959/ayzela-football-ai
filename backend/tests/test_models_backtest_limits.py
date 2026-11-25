@@ -125,7 +125,13 @@ def test_chronological_walk_forward_backtest():
     assert 0.0 <= res["models"]["poisson"]["brier_score"] <= 2.0
 
 
-def test_free_only_mode_and_usage_limit_guard(temp_repo):
+def test_free_only_mode_and_usage_limit_guard_and_market_implied(temp_repo):
+    from backend.models.market_implied import predict_from_market_odds
+
+    mkt = predict_from_market_odds({"1x2": {"home": 2.1, "draw": 3.2, "away": 3.4}, "ou_25": {"under": 1.85, "over": 1.85}})
+    assert mkt["enabled"] is True
+    assert abs(sum(mkt["probs"].values()) - 1.0) < 0.01
+
     with pytest.raises(FreeOnlyModeViolation):
         ensure_free_only_allowed(requires_payment=True, provider_name="PaidFootballAPI")
 

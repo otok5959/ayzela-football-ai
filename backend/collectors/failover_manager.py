@@ -134,8 +134,30 @@ class MultiSourceFailoverManager:
 
     def fetch_historical_for_league(self, organization_id: str) -> list[HistoricalMatch]:
         """Collect historical matches across open providers with automatic fallback."""
+        if not hasattr(self, "_hist_cache"):
+            self._hist_cache: dict[str, list[HistoricalMatch]] = {}
+        if organization_id in self._hist_cache:
+            return self._hist_cache[organization_id]
+
+        if organization_id.startswith("iddaa_comp_"):
+            self._hist_cache[organization_id] = []
+            return []
+
         matches: list[HistoricalMatch] = []
-        if organization_id == "ger_bundesliga":
+        if organization_id in ("uefa_ucl", "uefa_uel", "uefa_nations_league"):
+            matches.extend(self.uefa.fetch_historical_matches(organization_id))
+            for dom_org in (
+                "eng_premier_league",
+                "esp_la_liga",
+                "ger_bundesliga",
+                "ita_serie_a",
+                "fra_ligue_1",
+                "ned_eredivisie",
+                "por_primeira_liga",
+                "bel_pro_league",
+            ):
+                matches.extend(self.fetch_historical_for_league(dom_org))
+        elif organization_id == "ger_bundesliga":
             matches = self.openligadb.fetch_historical_matches(organization_id)
         if not matches:
             matches = self.openfootball_json.fetch_historical_matches(organization_id)
@@ -143,4 +165,7 @@ class MultiSourceFailoverManager:
             matches = self.openfootball_europe.fetch_historical_matches(organization_id)
         if not matches:
             matches = self.thesportsdb.fetch_historical_matches(organization_id)
+
+        matches.sort(key=lambda x: x.match_date_utc)
+        self._hist_cache[organization_id] = matches
         return matches

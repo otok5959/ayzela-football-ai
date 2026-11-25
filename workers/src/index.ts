@@ -125,9 +125,13 @@ export default {
           `SELECT f.*, mp.prediction_id, mp.prob_home, mp.prob_draw, mp.prob_away,
                   mp.prob_btts_yes, mp.prob_over_25, mp.data_coverage_score, mp.research_quality_score
            FROM fixtures f
-           LEFT JOIN match_predictions mp ON f.fixture_id = mp.fixture_id
+           LEFT JOIN match_predictions mp
+             ON f.fixture_id = mp.fixture_id
+            AND mp.created_at_utc = (
+              SELECT MAX(mp2.created_at_utc) FROM match_predictions mp2 WHERE mp2.fixture_id = f.fixture_id
+            )
            WHERE f.is_demo = 0
-           ORDER BY f.kickoff_tr ASC LIMIT 100`
+           ORDER BY f.analysis_day_tr DESC, f.league_name ASC, f.kickoff_tr ASC LIMIT 300`
         ).all();
         return jsonResponse({ fixtures: rows.results }, 200, origin);
       }

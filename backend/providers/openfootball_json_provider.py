@@ -23,9 +23,11 @@ LEAGUE_FILE_MAP = {
     "ned_eredivisie": "nl.1.json",
     "por_primeira_liga": "pt.1.json",
     "bel_pro_league": "be.1.json",
+    "bra_serie_a": "br.1.json",
 }
 
 DEFAULT_SEASONS = ["2026-27", "2025-26"]
+CALENDAR_YEAR_SEASONS = ["2026", "2025"]
 
 
 class OpenFootballJsonProvider(BaseProvider):
@@ -70,8 +72,9 @@ class OpenFootballJsonProvider(BaseProvider):
         if not filename:
             return []
 
+        season_list = seasons or (CALENDAR_YEAR_SEASONS if organization_id == "bra_serie_a" else DEFAULT_SEASONS)
         results: list[HistoricalMatch] = []
-        for season in seasons or DEFAULT_SEASONS:
+        for season in season_list:
             url = f"{BASE_RAW}/{season}/{filename}"
             try:
                 data, _, _, _ = self.http.get_json(url, ttl_seconds=1800, check_robots=False)

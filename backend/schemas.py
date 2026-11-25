@@ -49,6 +49,7 @@ class FixtureRecord(BaseModel):
     bulletin_source: str
     iddaa_verified: bool = False
     available_markets: list[str] = Field(default_factory=list)
+    iddaa_odds: dict[str, Any] = Field(default_factory=dict)
     is_demo: bool = False
     provenance: SourceProvenance
 

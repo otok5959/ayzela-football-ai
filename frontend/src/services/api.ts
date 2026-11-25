@@ -16,6 +16,7 @@ export interface SourceHealthRow {
 
 export interface FixtureRow {
   fixture_id: string;
+  iddaa_match_code?: string | null;
   organization_id: string;
   league_name: string;
   home_team_name: string;

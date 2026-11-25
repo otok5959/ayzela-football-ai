@@ -100,7 +100,7 @@ class _StubFailover:
         return self._history
 
 
-def test_morning_0800_and_independent_1159_and_max_15_cap(temp_repo):
+def test_morning_0800_and_independent_1159_and_full_bulletin(temp_repo):
     history = _synthetic_history()
     now_0800 = datetime(2026, 11, 25, 8, 3, tzinfo=ISTANBUL_TZ)  # 3 min delay recorded
     fixtures = []
@@ -143,7 +143,9 @@ def test_morning_0800_and_independent_1159_and_max_15_cap(temp_repo):
     )
     assert res_morning["status"] == "completed"
     assert res_morning["delay_seconds"] == 180
-    assert len(res_morning["bundles"]) == 15  # Max 15 cap enforced
+    assert len(res_morning["bundles"]) == 18
+    assert "[Kod: 2000]" in res_morning["report_text"]
+    assert "🏆 *İngiltere Premier League" in res_morning["report_text"]
 
     # Independent 11:59 run recalculates with fresh run_id and new predictions
     now_1159 = datetime(2026, 11, 25, 11, 59, tzinfo=ISTANBUL_TZ)

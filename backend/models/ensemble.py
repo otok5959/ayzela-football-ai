@@ -8,8 +8,9 @@ import numpy as np
 
 from backend.models.dixon_coles import fit_and_predict_dixon_coles
 from backend.models.elo import predict_from_elo
+from backend.models.market_implied import predict_from_market_odds
 from backend.models.ml_models import fit_and_predict_ml
-from backend.models.poisson import fit_and_predict_poisson, score_matrix
+from backend.models.poisson import fit_and_predict_poisson
 from backend.schemas import HistoricalMatch
 
 DEFAULT_WEIGHTS = {
@@ -25,6 +26,7 @@ def run_ensemble(
     home_team: str,
     away_team: str,
     weights: dict[str, float] | None = None,
+    iddaa_odds: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     w_cfg = weights or DEFAULT_WEIGHTS
     models: dict[str, dict[str, Any]] = {
@@ -35,10 +37,18 @@ def run_ensemble(
     }
 
     active = {k: v for k, v in models.items() if v.get("enabled")}
+    used_market_only = False
+    if not active and iddaa_odds:
+        mkt = predict_from_market_odds(iddaa_odds)
+        models["market_implied"] = mkt
+        if mkt.get("enabled"):
+            active = {"market_implied": mkt}
+            used_market_only = True
+
     if not active:
         return {
             "enabled": False,
-            "reason": "Hiçbir matematiksel model için yeterli doğrulanmış veri yok",
+            "reason": "Hiçbir matematiksel model veya piyasa oranı için yeterli doğrulanmış veri yok",
             "models": models,
         }
 
@@ -49,7 +59,6 @@ def run_ensemble(
     norm = p_home + p_draw + p_away
     p_home, p_draw, p_away = p_home / norm, p_draw / norm, p_away / norm
 
-    # Choose best available goal score matrix (Dixon-Coles preferred, then Poisson)
     matrix = None
     lam_h = None
     lam_a = None
@@ -61,9 +70,10 @@ def run_ensemble(
         matrix = active["poisson"]["matrix"]
         lam_h = active["poisson"]["lambda_home"]
         lam_a = active["poisson"]["lambda_away"]
-    elif "elo" in active:
-        # Derive conservative expected goals implied by Elo balance only when goal model unavailable
-        matrix = None
+    elif "market_implied" in active and "matrix" in active["market_implied"]:
+        matrix = active["market_implied"]["matrix"]
+        lam_h = active["market_implied"]["lambda_home"]
+        lam_a = active["market_implied"]["lambda_away"]
 
     breakdown = {
         k: (
@@ -81,6 +91,7 @@ def run_ensemble(
 
     return {
         "enabled": True,
+        "used_market_only": used_market_only,
         "active_models": list(active.keys()),
         "disabled_models": {k: v.get("reason") for k, v in models.items() if not v.get("enabled")},
         "probs": {"home": round(p_home, 4), "draw": round(p_draw, 4), "away": round(p_away, 4)},

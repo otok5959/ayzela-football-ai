@@ -121,25 +121,37 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
     reply = `🩺 *Veri Kaynakları Sağlık Durumu*\n${list}`;
   } else if (cmd === "/bugun") {
     const res = await env.DB.prepare(
-      `SELECT f.home_team_name, f.away_team_name, f.league_name, mp.prob_home, mp.prob_draw, mp.prob_away, mp.data_coverage_score
-       FROM match_predictions mp JOIN fixtures f ON mp.fixture_id = f.fixture_id
-       WHERE mp.is_demo = 0 ORDER BY mp.created_at_utc DESC LIMIT 15`
+      `SELECT f.iddaa_match_code, f.home_team_name, f.away_team_name, f.league_name, f.kickoff_tr,
+              mp.prob_home, mp.prob_draw, mp.prob_away, mp.data_coverage_score
+       FROM match_predictions mp
+       JOIN fixtures f ON mp.fixture_id = f.fixture_id
+       WHERE mp.is_demo = 0
+         AND mp.created_at_utc = (
+           SELECT MAX(mp2.created_at_utc) FROM match_predictions mp2 WHERE mp2.fixture_id = mp.fixture_id
+         )
+       ORDER BY f.league_name ASC, f.kickoff_tr ASC LIMIT 25`
     ).all();
     if (!res.results?.length) {
       reply = "📊 Henüz bugüne ait analiz kaydı bulunmuyor.";
     } else {
-      reply =
-        "📊 *Son Günlük Analizler*\n" +
-        res.results
-          .map(
-            (r: any, i: number) =>
-              `${i + 1}. *${r.home_team_name} - ${r.away_team_name}* (${r.league_name})\n   1-X-2: \`%${Math.round(
-                r.prob_home * 100
-              )}/%${Math.round(r.prob_draw * 100)}/%${Math.round(r.prob_away * 100)}\` | Veri: \`%${Math.round(
-                r.data_coverage_score * 100
-              )}\``
-          )
-          .join("\n");
+      let curLeague = "";
+      const outLines: string[] = ["📊 *Güncel Analizler (Lig Lig)*"];
+      res.results.forEach((r: any, i: number) => {
+        if (r.league_name !== curLeague) {
+          curLeague = r.league_name;
+          outLines.push(`\n🏆 *${curLeague}*`);
+        }
+        const code = r.iddaa_match_code || "-";
+        const timeStr = String(r.kickoff_tr || "").slice(11, 16);
+        outLines.push(
+          `${i + 1}. \`[Kod: ${code}]\` *${r.home_team_name} - ${r.away_team_name}* (${timeStr})\n` +
+            `   1-X-2: \`%${Math.round(r.prob_home * 100)}/%${Math.round(r.prob_draw * 100)}/%${Math.round(
+              r.prob_away * 100
+            )}\` | Veri: \`%${Math.round(r.data_coverage_score * 100)}\``
+        );
+      });
+      outLines.push(`\n🖥️ Tümü için panel: ${env.PANEL_ORIGIN}`);
+      reply = outLines.join("\n").slice(0, 3850);
     }
   } else if (cmd === "/analiz") {
     if (!arg) {

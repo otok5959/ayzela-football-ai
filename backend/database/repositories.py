@@ -130,6 +130,14 @@ class AyzelaRepository:
         )
 
     def upsert_fixture(self, f: FixtureRecord) -> None:
+        self.db.execute(
+            """
+            INSERT OR IGNORE INTO leagues (
+                organization_id, name_tr, country, country_code, tier, category, enabled, updated_at
+            ) VALUES (?, ?, ?, ?, 1, 'domestic_league', 1, ?)
+            """,
+            (f.organization_id, f.league_name, f.country, f.country[:3].upper() or "INT", utc_now_iso()),
+        )
         if f.home_team_id:
             self.upsert_team(f.home_team_id, f.home_team, organization_id=f.organization_id)
         if f.away_team_id:

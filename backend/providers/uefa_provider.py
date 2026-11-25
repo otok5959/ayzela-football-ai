@@ -8,7 +8,7 @@ from backend.collectors.team_matcher import canonical_team_id
 from backend.config import ISTANBUL_TZ, ensure_free_only_allowed
 from backend.providers.base import BaseProvider, utc_now_iso
 from backend.providers.iddaa_provider import compute_analysis_day_tr
-from backend.schemas import FixtureRecord, SourceHealthStatus, SourceProvenance
+from backend.schemas import FixtureRecord, HistoricalMatch, SourceHealthStatus, SourceProvenance
 from backend.validation.league_filter import LeagueFilter
 
 UEFA_COMPS = {
@@ -116,3 +116,42 @@ class UefaProvider(BaseProvider):
                     )
                 )
         return fixtures
+
+    def fetch_historical_matches(self, organization_id: str) -> list[HistoricalMatch]:
+        ensure_free_only_allowed(self.requires_payment, self.source_name)
+        comp_id = UEFA_COMPS.get(organization_id)
+        if not comp_id:
+            return []
+        url = f"https://match.uefa.com/v5/matches?competitionId={comp_id}&status=FINISHED&offset=0&limit=100"
+        try:
+            matches, _, _, _ = self.http.get_json(url, ttl_seconds=900, check_robots=False)
+        except Exception:
+            return []
+        out: list[HistoricalMatch] = []
+        for m in matches:
+            reg = (m.get("score") or {}).get("regular") or {}
+            hg = reg.get("home")
+            ag = reg.get("away")
+            if hg is None or ag is None:
+                continue
+            home = str((m.get("homeTeam") or {}).get("internationalName") or "")
+            away = str((m.get("awayTeam") or {}).get("internationalName") or "")
+            ko = str(((m.get("kickOffTime") or {}).get("dateTime")) or "")
+            if not home or not away or not ko:
+                continue
+            out.append(
+                HistoricalMatch(
+                    match_id=f"uefa_{m.get('id')}",
+                    organization_id=organization_id,
+                    season="2026-27",
+                    match_date_utc=ko,
+                    home_team=home,
+                    away_team=away,
+                    home_goals=int(hg),
+                    away_goals=int(ag),
+                    source_name=self.source_name,
+                    source_url=url,
+                )
+            )
+        out.sort(key=lambda x: x.match_date_utc)
+        return out

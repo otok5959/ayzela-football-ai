@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from backend.collectors.team_matcher import canonical_team_id
-from backend.config import ISTANBUL_TZ, ensure_free_only_allowed
+from backend.config import ISTANBUL_TZ, ensure_free_only_allowed, get_settings
 from backend.providers.base import BaseProvider, utc_now_iso
 from backend.schemas import FixtureRecord, SourceHealthStatus, SourceProvenance
 from backend.validation.league_filter import LeagueFilter
@@ -84,6 +84,9 @@ class IddaaProvider(BaseProvider):
         if not isinstance(events, list):
             raise RuntimeError("İddaa events alanı liste değil (şema değişmiş olabilir)")
 
+        include_all = get_settings().all_iddaa_bulletin
+        virtual_words = ("sanal", "virtual", "e-futbol", "efootball", "esports", "cyber", "simulated")
+
         fixtures: list[FixtureRecord] = []
         for ev in events:
             try:
@@ -94,12 +97,23 @@ class IddaaProvider(BaseProvider):
                 raw_league_name = str(comp_info.get("n") or f"Lig {comp_id}")
                 country_code = str(comp_info.get("cid") or "INT")
 
+                if any(vw in raw_league_name.lower() for vw in virtual_words):
+                    continue
+
                 matched_lg = self.league_filter.match(
                     league_name=raw_league_name,
                     iddaa_comp_id=comp_id,
                     country_code=country_code,
                 )
-                if not matched_lg:
+                if matched_lg:
+                    org_id = matched_lg["organization_id"]
+                    league_name = matched_lg["name_tr"]
+                    country = matched_lg["country"]
+                elif include_all:
+                    org_id = f"iddaa_comp_{comp_id}"
+                    league_name = raw_league_name
+                    country = country_code
+                else:
                     continue
 
                 ts = int(ev["d"])
@@ -121,11 +135,25 @@ class IddaaProvider(BaseProvider):
                     continue
 
                 market_names: list[str] = []
+                iddaa_odds: dict[str, Any] = {}
                 for m in ev.get("m", []):
                     t = int(m.get("t", -1))
+                    st = int(m.get("st", -1))
+                    sov = str(m.get("sov") or "")
                     label = MARKET_TYPE_LABELS.get(t)
                     if label and label not in market_names:
                         market_names.append(label)
+                    outcomes = {str(o.get("n")): float(o.get("odd")) for o in m.get("o", []) if o.get("odd")}
+                    if t == 1 and st == 1 and {"1", "0", "2"}.issubset(outcomes):
+                        iddaa_odds["1x2"] = {
+                            "home": outcomes["1"],
+                            "draw": outcomes["0"],
+                            "away": outcomes["2"],
+                        }
+                    elif t == 2 and st == 101 and sov == "2.5" and {"Alt", "Üst"}.issubset(outcomes):
+                        iddaa_odds["ou_25"] = {"under": outcomes["Alt"], "over": outcomes["Üst"]}
+                    elif t == 2 and st == 89 and {"Var", "Yok"}.issubset(outcomes):
+                        iddaa_odds["btts"] = {"yes": outcomes["Var"], "no": outcomes["Yok"]}
 
                 event_id = str(ev["i"])
                 match_code = str(ev.get("bri") or event_id)
@@ -134,9 +162,9 @@ class IddaaProvider(BaseProvider):
                         fixture_id=f"iddaa_{event_id}",
                         iddaa_event_id=event_id,
                         iddaa_match_code=match_code,
-                        organization_id=matched_lg["organization_id"],
-                        league_name=matched_lg["name_tr"],
-                        country=matched_lg["country"],
+                        organization_id=org_id,
+                        league_name=league_name,
+                        country=country,
                         home_team=home_name,
                         away_team=away_name,
                         home_team_id=canonical_team_id(home_name),
@@ -148,6 +176,7 @@ class IddaaProvider(BaseProvider):
                         bulletin_source="iddaa",
                         iddaa_verified=True,
                         available_markets=market_names,
+                        iddaa_odds=iddaa_odds,
                         is_demo=False,
                         provenance=SourceProvenance(
                             source_name=self.source_name,

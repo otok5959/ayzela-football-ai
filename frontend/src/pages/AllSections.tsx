@@ -119,8 +119,8 @@ export function PanelContent({
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <div className="rounded-xl border border-slate-800 bg-pitch-800 p-4">
             <div className="text-xs text-slate-400">Analiz Edilen Maç</div>
-            <div className="mt-1 text-2xl font-bold text-emerald-400">{fixtures.length} / 15</div>
-            <div className="mt-1 text-xs text-slate-500">Günlük üst sınır aktif</div>
+            <div className="mt-1 text-2xl font-bold text-emerald-400">{fixtures.filter((f) => f.prob_home !== undefined && f.prob_home !== null).length} / {fixtures.length}</div>
+            <div className="mt-1 text-xs text-slate-500">Tüm İddaa Bülteni aktif</div>
           </div>
           <div className="rounded-xl border border-slate-800 bg-pitch-800 p-4">
             <div className="text-xs text-slate-400">Ort. Veri Kapsamı</div>
@@ -153,42 +153,73 @@ export function PanelContent({
   }
 
   if (tab === "fixtures" || tab === "history" || tab === "results") {
+    const groupedByLeague = new Map<string, FixtureRow[]>();
+    const sorted = [...fixtures].sort(
+      (a, b) => a.league_name.localeCompare(b.league_name, "tr") || a.kickoff_tr.localeCompare(b.kickoff_tr)
+    );
+    for (const f of sorted) {
+      const list = groupedByLeague.get(f.league_name) || [];
+      list.push(f);
+      groupedByLeague.set(f.league_name, list);
+    }
+
     return (
-      <div className="space-y-4">
-        <h2 className="text-lg font-semibold text-slate-100">
-          {tab === "fixtures" ? "Günlük Karşılaşmalar (Maks. 15)" : tab === "history" ? "Değiştirilemez Geçmiş Analizler" : "Sonuç Takip Merkezi"}
-        </h2>
-        <div className="grid gap-3">
-          {fixtures.map((f) => (
-            <div key={f.fixture_id} className="rounded-xl border border-slate-800 bg-pitch-800 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <div className="text-xs text-emerald-400">{f.league_name} • {f.kickoff_tr.slice(0, 16).replace("T", " ")} TRT</div>
-                  <div className="text-base font-semibold text-white">{f.home_team_name} - {f.away_team_name}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className={`rounded px-2 py-0.5 text-xs ${f.iddaa_verified ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"}`}>
-                    {f.iddaa_verified ? "İddaa Onaylı" : `Yedek (${f.bulletin_source})`}
-                  </span>
-                  <button
-                    onClick={() => onSelectFixture(f)}
-                    className="rounded-lg bg-slate-700 px-3 py-1 text-xs font-medium text-white hover:bg-slate-600"
-                  >
-                    Detay
-                  </button>
-                </div>
-              </div>
-              {f.prob_home !== undefined && (
-                <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
-                  <div className="rounded bg-pitch-900 p-2">1-X-2: %{Math.round(f.prob_home * 100)} / %{Math.round((f.prob_draw || 0) * 100)} / %{Math.round((f.prob_away || 0) * 100)}</div>
-                  <div className="rounded bg-pitch-900 p-2">KG Var: %{Math.round((f.prob_btts_yes || 0) * 100)}</div>
-                  <div className="rounded bg-pitch-900 p-2">2.5 Üst: %{Math.round((f.prob_over_25 || 0) * 100)}</div>
-                  <div className="rounded bg-pitch-900 p-2 text-sky-300">Veri Kapsamı: %{Math.round((f.data_coverage_score || 0) * 100)}</div>
-                </div>
-              )}
-            </div>
-          ))}
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-lg font-semibold text-slate-100">
+            {tab === "fixtures"
+              ? `Günlük Karşılaşmalar (${fixtures.length} maç, ${groupedByLeague.size} lig)`
+              : tab === "history"
+              ? "Değiştirilemez Geçmiş Analizler"
+              : "Sonuç Takip Merkezi"}
+          </h2>
         </div>
+        {[...groupedByLeague.entries()].map(([leagueName, leagueFixtures]) => (
+          <div key={leagueName} className="space-y-2.5">
+            <div className="flex items-center justify-between rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-3 py-2">
+              <span className="text-sm font-semibold text-emerald-300">🏆 {leagueName}</span>
+              <span className="text-xs text-emerald-200/80">{leagueFixtures.length} maç</span>
+            </div>
+            <div className="grid gap-3">
+              {leagueFixtures.map((f) => (
+                <div key={f.fixture_id} className="rounded-xl border border-slate-800 bg-pitch-800 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-emerald-400">
+                        {f.iddaa_match_code && (
+                          <span className="rounded bg-slate-700/80 px-2 py-0.5 font-mono text-[11px] font-semibold text-sky-300">
+                            Kod: {f.iddaa_match_code}
+                          </span>
+                        )}
+                        <span>{f.kickoff_tr.slice(0, 16).replace("T", " ")} TRT</span>
+                      </div>
+                      <div className="mt-1 text-base font-semibold text-white">{f.home_team_name} - {f.away_team_name}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`rounded px-2 py-0.5 text-xs ${f.iddaa_verified ? "bg-emerald-500/20 text-emerald-300" : "bg-amber-500/20 text-amber-300"}`}>
+                        {f.iddaa_verified ? "İddaa Onaylı" : `Yedek (${f.bulletin_source})`}
+                      </span>
+                      <button
+                        onClick={() => onSelectFixture(f)}
+                        className="rounded-lg bg-slate-700 px-3 py-1 text-xs font-medium text-white hover:bg-slate-600"
+                      >
+                        Detay
+                      </button>
+                    </div>
+                  </div>
+                  {f.prob_home !== undefined && f.prob_home !== null && (
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                      <div className="rounded bg-pitch-900 p-2">1-X-2: %{Math.round(f.prob_home * 100)} / %{Math.round((f.prob_draw || 0) * 100)} / %{Math.round((f.prob_away || 0) * 100)}</div>
+                      <div className="rounded bg-pitch-900 p-2">KG Var: %{Math.round((f.prob_btts_yes || 0) * 100)}</div>
+                      <div className="rounded bg-pitch-900 p-2">2.5 Üst: %{Math.round((f.prob_over_25 || 0) * 100)}</div>
+                      <div className="rounded bg-pitch-900 p-2 text-sky-300">Veri Kapsamı: %{Math.round((f.data_coverage_score || 0) * 100)}</div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
       </div>
     );
   }
@@ -449,7 +480,7 @@ export function PanelContent({
     <div className="space-y-3 rounded-xl border border-slate-800 bg-pitch-800 p-5 text-sm text-slate-300">
       <h2 className="text-lg font-semibold text-white">Genel Sistem Ayarları</h2>
       <p>• Saat Dilimi: `Europe/Istanbul` (UTC+3)</p>
-      <p>• Günlük Maksimum Maç: `15`</p>
+      <p>• Günlük Maksimum Maç: `250 (Tüm Bülten)`</p>
       <p>• `FREE_ONLY_MODE`: `Aktif` (Ücretli AI ve ücretli futbol API kullanımı engellidir)</p>
       <p>• `football-data.co.uk`: Kalıcı olarak devre dışı bırakıldı</p>
     </div>

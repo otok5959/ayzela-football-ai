@@ -67,11 +67,19 @@ def test_all_18_telegram_commands_and_manual_queue(temp_repo):
     assert any("full_now" in j["payload_json"] for j in jobs2)
 
 
-def test_duplicate_telegram_notification_blocked(temp_repo):
+def test_duplicate_telegram_notification_blocked_and_chunking(temp_repo):
+    from backend.telegram.bot_client import split_telegram_message
+
+    long_text = "\n".join([f"{i}. [Kod: {1000+i}] TakimA - TakimB | 1-X-2: %45/%28/%27" for i in range(120)])
+    parts = split_telegram_message(long_text, max_len=3800)
+    assert len(parts) >= 2
+    assert all(len(p) <= 3850 for p in parts)
+
     bot = TelegramBotClient(repo=temp_repo, bot_token="", chat_id="111222333")
-    r1 = bot.send_message("Test raporu", dedup_key="daily_2026-11-25_0800", notification_type="daily_report")
-    r2 = bot.send_message("Test raporu", dedup_key="daily_2026-11-25_0800", notification_type="daily_report")
+    r1 = bot.send_message(long_text, dedup_key="daily_2026-11-25_0800", notification_type="daily_report")
+    r2 = bot.send_message(long_text, dedup_key="daily_2026-11-25_0800", notification_type="daily_report")
     assert r1["sent"] is True
+    assert r1["parts"] >= 2
     assert r2["sent"] is False
     assert r2["reason"] == "duplicate_blocked"
 

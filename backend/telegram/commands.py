@@ -116,36 +116,49 @@ class TelegramCommandRouter:
         today_tr = datetime.now(ISTANBUL_TZ).date().isoformat()
         rows = self.repo.db.execute(
             """
-            SELECT f.home_team_name, f.away_team_name, f.league_name, f.kickoff_tr,
+            SELECT f.iddaa_match_code, f.home_team_name, f.away_team_name, f.league_name, f.kickoff_tr,
                    mp.prob_home, mp.prob_draw, mp.prob_away, mp.data_coverage_score, mp.iddaa_verified
             FROM match_predictions mp
             JOIN fixtures f ON mp.fixture_id = f.fixture_id
             WHERE mp.analysis_day_tr = ? AND mp.is_demo = 0
-            ORDER BY mp.created_at_utc DESC, mp.data_coverage_score DESC
-            LIMIT 15
+              AND mp.created_at_utc = (
+                SELECT MAX(mp2.created_at_utc) FROM match_predictions mp2 WHERE mp2.fixture_id = mp.fixture_id
+              )
+            ORDER BY f.league_name ASC, f.kickoff_tr ASC
+            LIMIT 30
             """,
             (today_tr,),
         )
         if not rows:
             return (f"📅 `{today_tr}` için henüz kayıtlı günlük analiz yok.", main_menu_keyboard())
         lines = [f"📊 *Bugünkü Analizler ({today_tr})*"]
+        cur_lg = None
         for i, r in enumerate(rows, 1):
-            badge = "İddaa✅" if r["iddaa_verified"] else "Yedek⚠️"
+            if r["league_name"] != cur_lg:
+                cur_lg = r["league_name"]
+                lines.append(f"\n🏆 *{cur_lg}*")
+            code = r.get("iddaa_match_code") or "-"
+            badge = "✅" if r["iddaa_verified"] else "⚠️"
             lines.append(
-                f"{i}. *{r['home_team_name']} - {r['away_team_name']}* ({r['league_name']})\n"
-                f"   1-X-2: `%{int(r['prob_home']*100)}/%{int(r['prob_draw']*100)}/%{int(r['prob_away']*100)}` | "
-                f"Veri: `%{int(r['data_coverage_score']*100)}` | {badge}"
+                f"{i}. `[Kod: {code}]` *{r['home_team_name']} - {r['away_team_name']}* ({r['kickoff_tr'][11:16]})\n"
+                f"   1-X-2: `%{int(r['prob_home']*100)}/%{int(r['prob_draw']*100)}/%{int(r['prob_away']*100)}` | Veri: `%{int(r['data_coverage_score']*100)}` {badge}"
             )
         return ("\n".join(lines), main_menu_keyboard())
 
     def _cmd_yarin(self, _: str) -> tuple[str, dict]:
         tomorrow_tr = (datetime.now(ISTANBUL_TZ).date() + timedelta(days=1)).isoformat()
-        rows = self.repo.list_fixtures_for_day(tomorrow_tr, include_demo=False)[:15]
+        rows = self.repo.list_fixtures_for_day(tomorrow_tr, include_demo=False)
+        rows.sort(key=lambda r: (r["league_name"], r["kickoff_tr"]))
         if not rows:
             return (f"📅 `{tomorrow_tr}` için kayıtlı fikstür henüz yok.", main_menu_keyboard())
         lines = [f"📅 *Yarının Fikstürü ({tomorrow_tr})*"]
-        for r in rows:
-            lines.append(f"- {r['kickoff_tr'][11:16]} | {r['league_name']}: *{r['home_team_name']} - {r['away_team_name']}*")
+        cur_lg = None
+        for r in rows[:30]:
+            if r["league_name"] != cur_lg:
+                cur_lg = r["league_name"]
+                lines.append(f"\n🏆 *{cur_lg}*")
+            code = r.get("iddaa_match_code") or "-"
+            lines.append(f"- `[Kod: {code}]` {r['kickoff_tr'][11:16]} | *{r['home_team_name']} - {r['away_team_name']}*")
         return ("\n".join(lines), main_menu_keyboard())
 
     def _cmd_analiz(self, arg: str) -> tuple[str, dict]:

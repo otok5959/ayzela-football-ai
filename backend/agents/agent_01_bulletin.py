@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from backend.config import ISTANBUL_TZ
+from backend.config import ISTANBUL_TZ, get_settings
 from backend.schemas import AgentOutput, FixtureRecord
 from backend.validation.league_filter import LeagueFilter
 
@@ -16,13 +16,15 @@ def filter_and_dedup_bulletin(
     window_end_tr: datetime | None = None,
 ) -> list[FixtureRecord]:
     lf = league_filter or LeagueFilter()
+    include_all = get_settings().all_iddaa_bulletin
     seen: set[str] = set()
     clean: list[FixtureRecord] = []
 
     for fx in fixtures:
         if fx.status in ("live", "finished", "postponed", "cancelled"):
             continue
-        if not lf.match(fx.league_name, organization_id_hint=fx.organization_id):
+        is_dynamic_iddaa = include_all and fx.organization_id.startswith("iddaa_comp_") and not lf.is_excluded_name(fx.league_name)
+        if not is_dynamic_iddaa and not lf.match(fx.league_name, organization_id_hint=fx.organization_id):
             continue
         kickoff_tr = datetime.fromisoformat(fx.kickoff_tr)
         if kickoff_tr.tzinfo is None:

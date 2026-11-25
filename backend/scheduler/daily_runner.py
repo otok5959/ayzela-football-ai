@@ -133,8 +133,6 @@ def run_daily_analysis(
     }
 
     for fx in candidates:
-        repo.upsert_team(fx.home_team_id or fx.home_team, fx.home_team, organization_id=fx.organization_id)
-        repo.upsert_team(fx.away_team_id or fx.away_team, fx.away_team, organization_id=fx.organization_id)
         repo.upsert_fixture(fx)
 
         if fx.organization_id not in history_cache:
@@ -152,7 +150,7 @@ def run_daily_analysis(
 
         weather = None
         try:
-            country_code = (league_filter.by_org_id.get(fx.organization_id) or {}).get("country_code", "INT")
+            country_code = (league_filter.by_org_id.get(fx.organization_id) or {}).get("country_code") or fx.country
             weather = failover.open_meteo.fetch_match_weather(fx.home_team, country_code, fx.kickoff_utc)
         except Exception:
             weather = None
@@ -187,6 +185,8 @@ def run_daily_analysis(
 
     for b in bundles:
         for out in b.agent_outputs:
+            if len(bundles) > 20 and settings.db_backend.lower() == "d1" and out.agent_id not in ("agent_01", "agent_11", "agent_12") and out.status == "insufficient_data":
+                continue
             repo.save_research_record(out, is_demo=b.is_demo)
         repo.insert_immutable_prediction(b)
 

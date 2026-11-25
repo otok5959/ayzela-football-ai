@@ -271,7 +271,7 @@ CREATE TABLE IF NOT EXISTS analysis_runs (
     delay_seconds INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'skipped_limit')),
     bulletin_source TEXT NOT NULL,
-    matches_analyzed INTEGER NOT NULL DEFAULT 0 CHECK (matches_analyzed <= 30),
+    matches_analyzed INTEGER NOT NULL DEFAULT 0 CHECK (matches_analyzed >= 0),
     avg_data_coverage REAL NOT NULL DEFAULT 0.0,
     is_demo INTEGER NOT NULL DEFAULT 0 CHECK (is_demo IN (0, 1)),
     notes_tr TEXT
