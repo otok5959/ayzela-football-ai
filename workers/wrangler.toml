@@ -13,7 +13,7 @@ TZ = "Europe/Istanbul"
 FREE_ONLY_MODE = "true"
 ADMIN_USERNAME = "ayzela_admin"
 PANEL_ORIGIN = "https://ayzela-panel.pages.dev"
-GITHUB_REPOSITORY = "username/ayzela-football-ai"
+GITHUB_REPOSITORY = "otok5959/ayzela-football-ai"
 
 [[d1_databases]]
 binding = "DB"
