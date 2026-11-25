@@ -1,0 +1,31 @@
+name: AyzEla 11:59 TRT Bağımsız Analiz
+
+on:
+  schedule:
+    # 11:59 Europe/Istanbul (UTC+3) = 08:59 UTC
+    - cron: '59 8 * * *'
+  workflow_dispatch:
+
+jobs:
+  analyze-midday:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TZ: Europe/Istanbul
+      DB_BACKEND: d1
+      FREE_ONLY_MODE: 'true'
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CLOUDFLARE_DATABASE_ID: ${{ secrets.CLOUDFLARE_DATABASE_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_ALLOWED_USER_ID: ${{ secrets.TELEGRAM_ALLOWED_USER_ID }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      PANEL_BASE_URL: ${{ secrets.PANEL_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      - run: pip install -r requirements.txt
+      - run: python scripts/run_daily_analysis.py --run-type midday_1159

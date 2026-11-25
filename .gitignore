@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+
+# Environment & Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials/
+
+# Local Databases & Cache
+data/
+*.sqlite
+*.sqlite3
+
+# Frontend & Workers
+frontend/node_modules/
+frontend/dist/
+workers/node_modules/
+workers/.wrangler/
+.wrangler/
+
+# Logs & OS
+logs/
+*.log
+.DS_Store
+Thumbs.db

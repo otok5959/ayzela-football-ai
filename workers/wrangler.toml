@@ -1,0 +1,22 @@
+name = "ayzela-football-ai-api"
+main = "src/index.ts"
+compatibility_date = "2025-02-01"
+
+# Gizli anahtarlar buraya yazılmaz; wrangler secret put ile eklenir:
+# TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USER_ID, TELEGRAM_CHAT_ID,
+# TELEGRAM_WEBHOOK_SECRET, ADMIN_SESSION_SECRET, ADMIN_PASSWORD_HASH,
+# GITHUB_DISPATCH_TOKEN
+
+[vars]
+APP_ENV = "production"
+TZ = "Europe/Istanbul"
+FREE_ONLY_MODE = "true"
+ADMIN_USERNAME = "ayzela_admin"
+PANEL_ORIGIN = "https://ayzela-panel.pages.dev"
+GITHUB_REPOSITORY = "username/ayzela-football-ai"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ayzela-football-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "../migrations"

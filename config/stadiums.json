@@ -1,0 +1,36 @@
+{
+  "teams": {
+    "galatasaray": {"stadium": "RAMS Park", "city": "İstanbul", "lat": 41.1034, "lon": 28.9912},
+    "fenerbahce": {"stadium": "Ülker Stadyumu", "city": "İstanbul", "lat": 40.9876, "lon": 29.0369},
+    "besiktas": {"stadium": "Tüpraş Stadyumu", "city": "İstanbul", "lat": 41.0393, "lon": 28.9942},
+    "trabzonspor": {"stadium": "Papara Park", "city": "Trabzon", "lat": 40.9997, "lon": 39.6442},
+    "basaksehir": {"stadium": "Başakşehir Fatih Terim", "city": "İstanbul", "lat": 41.1228, "lon": 28.8087},
+    "arsenal": {"stadium": "Emirates Stadium", "city": "Londra", "lat": 51.5549, "lon": -0.1084},
+    "liverpool": {"stadium": "Anfield", "city": "Liverpool", "lat": 53.4308, "lon": -2.9608},
+    "manchester city": {"stadium": "Etihad Stadium", "city": "Manchester", "lat": 53.4831, "lon": -2.2004},
+    "chelsea": {"stadium": "Stamford Bridge", "city": "Londra", "lat": 51.4817, "lon": -0.1910},
+    "real madrid": {"stadium": "Santiago Bernabéu", "city": "Madrid", "lat": 40.4530, "lon": -3.6883},
+    "barcelona": {"stadium": "Estadi Olímpic / Camp Nou", "city": "Barselona", "lat": 41.3809, "lon": 2.1228},
+    "bayern munich": {"stadium": "Allianz Arena", "city": "Münih", "lat": 48.2188, "lon": 11.6247},
+    "borussia dortmund": {"stadium": "Signal Iduna Park", "city": "Dortmund", "lat": 51.4926, "lon": 7.4519},
+    "inter": {"stadium": "San Siro", "city": "Milano", "lat": 45.4781, "lon": 9.1240},
+    "juventus": {"stadium": "Allianz Stadium", "city": "Torino", "lat": 45.1096, "lon": 7.6413},
+    "psg": {"stadium": "Parc des Princes", "city": "Paris", "lat": 48.8414, "lon": 2.2530},
+    "ajax": {"stadium": "Johan Cruijff ArenA", "city": "Amsterdam", "lat": 52.3144, "lon": 4.9419},
+    "benfica": {"stadium": "Estádio da Luz", "city": "Lizbon", "lat": 38.7527, "lon": -9.1847}
+  },
+  "country_fallbacks": {
+    "TR": {"city": "İstanbul", "lat": 41.0082, "lon": 28.9784},
+    "GB": {"city": "Londra", "lat": 51.5074, "lon": -0.1278},
+    "ES": {"city": "Madrid", "lat": 40.4168, "lon": -3.7038},
+    "DE": {"city": "Berlin", "lat": 52.5200, "lon": 13.4050},
+    "IT": {"city": "Roma", "lat": 41.9028, "lon": 12.4964},
+    "FR": {"city": "Paris", "lat": 48.8566, "lon": 2.3522},
+    "NL": {"city": "Amsterdam", "lat": 52.3676, "lon": 4.9041},
+    "PT": {"city": "Lizbon", "lat": 38.7223, "lon": -9.1393},
+    "BE": {"city": "Brüksel", "lat": 50.8503, "lon": 4.3517},
+    "SCO": {"city": "Glasgow", "lat": 55.8642, "lon": -4.2518},
+    "BR": {"city": "São Paulo", "lat": -23.5505, "lon": -46.6333},
+    "AR": {"city": "Buenos Aires", "lat": -34.6037, "lon": -58.3816}
+  }
+}

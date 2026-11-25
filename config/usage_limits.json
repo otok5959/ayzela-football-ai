@@ -1,0 +1,55 @@
+{
+  "free_only_mode": true,
+  "warn_threshold_pct": 80,
+  "hard_stop_threshold_pct": 95,
+  "limits": [
+    {
+      "resource_key": "github_actions_minutes_monthly",
+      "label_tr": "GitHub Actions Dakika (Aylık)",
+      "period": "monthly",
+      "max_limit": 2000,
+      "unit": "dakika",
+      "note": "Private depo ücretsiz limiti; public depoda sınırsız."
+    },
+    {
+      "resource_key": "cloudflare_workers_requests_daily",
+      "label_tr": "Cloudflare Workers İstek (Günlük)",
+      "period": "daily",
+      "max_limit": 100000,
+      "unit": "istek",
+      "note": "Workers Free katmanı günlük 100.000 istek."
+    },
+    {
+      "resource_key": "cloudflare_d1_reads_daily",
+      "label_tr": "Cloudflare D1 Satır Okuma (Günlük)",
+      "period": "daily",
+      "max_limit": 5000000,
+      "unit": "satır",
+      "note": "Aşılırsa UTC 00:00'a kadar D1 sorguları durur."
+    },
+    {
+      "resource_key": "cloudflare_d1_writes_daily",
+      "label_tr": "Cloudflare D1 Satır Yazma (Günlük)",
+      "period": "daily",
+      "max_limit": 100000,
+      "unit": "satır",
+      "note": "Aşılırsa UTC 00:00'a kadar D1 yazmaları durur."
+    },
+    {
+      "resource_key": "cloudflare_pages_builds_monthly",
+      "label_tr": "Cloudflare Pages Derleme (Aylık)",
+      "period": "monthly",
+      "max_limit": 500,
+      "unit": "build",
+      "note": "Pages Free katmanı aylık 500 build."
+    },
+    {
+      "resource_key": "telegram_messages_daily",
+      "label_tr": "Telegram Bildirim Kotası (Günlük)",
+      "period": "daily",
+      "max_limit": 200,
+      "unit": "mesaj",
+      "note": "Kişisel bot spam ve hız sınırı koruması."
+    }
+  ]
+}
