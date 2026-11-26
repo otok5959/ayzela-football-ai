@@ -41,11 +41,22 @@ export function getIstanbulDates(): { todayTr: string; yesterdayTr: string } {
   return { todayTr, yesterdayTr };
 }
 
+function isSecondHalfOrHt(liveMinute?: string | null): boolean {
+  if (!liveMinute) return false;
+  const m = liveMinute.trim().toUpperCase();
+  if (m === "İY" || m === "DEVRE ARASI" || m === "MS") return true;
+  const digits = m.replace(/\D/g, "");
+  return Boolean(digits && Number(digits) >= 46);
+}
+
 export function evaluatePick(
   pickKey: string,
   hg: number | null | undefined,
   ag: number | null | undefined,
-  matchStatus: string
+  matchStatus: string,
+  htHg?: number | null,
+  htAg?: number | null,
+  liveMinute?: string | null
 ): { state: PickEvalState; locked: boolean } {
   if (
     hg === null ||
@@ -62,50 +73,125 @@ export function evaluatePick(
   const tot = h + a;
   const finished = matchStatus === "finished";
 
+  // First-half markets
+  if (pickKey.startsWith("iy_")) {
+    const htDone = finished || isSecondHalfOrHt(liveMinute);
+    let hh: number;
+    let ha: number;
+    if (htHg !== null && htHg !== undefined && htAg !== null && htAg !== undefined) {
+      hh = Number(htHg);
+      ha = Number(htAg);
+    } else if (!htDone && matchStatus === "live") {
+      hh = h;
+      ha = a;
+    } else {
+      return { state: "pending", locked: false };
+    }
+
+    const htTot = hh + ha;
+    let htHit: boolean | null = null;
+    switch (pickKey) {
+      case "iy_1": htHit = hh > ha; break;
+      case "iy_x": htHit = hh === ha; break;
+      case "iy_2": htHit = ha > hh; break;
+      case "iy_1x": htHit = hh >= ha; break;
+      case "iy_x2": htHit = ha >= hh; break;
+      case "iy_12": htHit = hh !== ha; break;
+      case "iy_ust_0_5": htHit = htTot >= 1; break;
+      case "iy_alt_0_5": htHit = htTot === 0; break;
+      case "iy_ust_1_5": htHit = htTot >= 2; break;
+      case "iy_alt_1_5": htHit = htTot <= 1; break;
+      case "iy_kg_var": htHit = hh > 0 && ha > 0; break;
+      case "iy_kg_yok": htHit = !(hh > 0 && ha > 0); break;
+      default: return { state: "pending", locked: false };
+    }
+    if (htDone) {
+      return {
+        state: finished ? (htHit ? "won" : "lost") : htHit ? "live_won" : "live_lost",
+        locked: true,
+      };
+    }
+    const locked =
+      ((pickKey === "iy_ust_0_5" || pickKey === "iy_alt_0_5") && htTot >= 1) ||
+      ((pickKey === "iy_ust_1_5" || pickKey === "iy_alt_1_5") && htTot >= 2) ||
+      ((pickKey === "iy_kg_var" || pickKey === "iy_kg_yok") && hh > 0 && ha > 0);
+    return { state: htHit ? "live_won" : "live_lost", locked };
+  }
+
+  // Second-half markets
+  if (pickKey.startsWith("2y_")) {
+    if (htHg === null || htHg === undefined || htAg === null || htAg === undefined) {
+      return { state: "pending", locked: false };
+    }
+    if (!finished && !isSecondHalfOrHt(liveMinute)) {
+      return { state: "pending", locked: false };
+    }
+    const shH = h - Number(htHg);
+    const shA = a - Number(htAg);
+    let shHit: boolean | null = null;
+    if (pickKey === "2y_1") shHit = shH > shA;
+    else if (pickKey === "2y_x") shHit = shH === shA;
+    else if (pickKey === "2y_2") shHit = shA > shH;
+    if (shHit === null) return { state: "pending", locked: false };
+    if (finished) return { state: shHit ? "won" : "lost", locked: true };
+    return { state: shHit ? "live_won" : "live_lost", locked: false };
+  }
+
   let hit: boolean | null = null;
   switch (pickKey) {
-    case "ms_1":
-      hit = h > a;
-      break;
-    case "ms_x":
-      hit = h === a;
-      break;
-    case "ms_2":
-      hit = a > h;
-      break;
-    case "dc_1x":
-      hit = h >= a;
-      break;
-    case "dc_x2":
-      hit = a >= h;
-      break;
-    case "dc_12":
-      hit = h !== a;
-      break;
-    case "kg_var":
-      hit = h > 0 && a > 0;
-      break;
-    case "kg_yok":
-      hit = !(h > 0 && a > 0);
-      break;
-    case "ust_1_5":
-      hit = tot >= 2;
-      break;
-    case "alt_1_5":
-      hit = tot <= 1;
-      break;
-    case "ust_2_5":
-      hit = tot >= 3;
-      break;
-    case "alt_2_5":
-      hit = tot <= 2;
-      break;
-    case "ust_3_5":
-      hit = tot >= 4;
-      break;
-    case "alt_3_5":
-      hit = tot <= 3;
-      break;
+    case "ms_1": hit = h > a; break;
+    case "ms_x": hit = h === a; break;
+    case "ms_2": hit = a > h; break;
+    case "dc_1x": hit = h >= a; break;
+    case "dc_x2": hit = a >= h; break;
+    case "dc_12": hit = h !== a; break;
+    case "kg_var": hit = h > 0 && a > 0; break;
+    case "kg_yok": hit = !(h > 0 && a > 0); break;
+    case "ust_1_5": hit = tot >= 2; break;
+    case "alt_1_5": hit = tot <= 1; break;
+    case "ust_2_5": hit = tot >= 3; break;
+    case "alt_2_5": hit = tot <= 2; break;
+    case "ust_3_5": hit = tot >= 4; break;
+    case "alt_3_5": hit = tot <= 3; break;
+    case "ust_4_5": hit = tot >= 5; break;
+    case "alt_4_5": hit = tot <= 4; break;
+    case "ev_ust_0_5": hit = h >= 1; break;
+    case "ev_alt_0_5": hit = h === 0; break;
+    case "ev_ust_1_5": hit = h >= 2; break;
+    case "ev_alt_1_5": hit = h <= 1; break;
+    case "ev_ust_2_5": hit = h >= 3; break;
+    case "ev_alt_2_5": hit = h <= 2; break;
+    case "dep_ust_0_5": hit = a >= 1; break;
+    case "dep_alt_0_5": hit = a === 0; break;
+    case "dep_ust_1_5": hit = a >= 2; break;
+    case "dep_alt_1_5": hit = a <= 1; break;
+    case "dep_ust_2_5": hit = a >= 3; break;
+    case "dep_alt_2_5": hit = a <= 2; break;
+    case "ms1_ust_1_5": hit = h > a && tot >= 2; break;
+    case "ms1_alt_1_5": hit = h > a && tot <= 1; break;
+    case "ms2_ust_1_5": hit = a > h && tot >= 2; break;
+    case "ms2_alt_1_5": hit = a > h && tot <= 1; break;
+    case "ms1_ust_2_5": hit = h > a && tot >= 3; break;
+    case "ms1_alt_2_5": hit = h > a && tot <= 2; break;
+    case "ms2_ust_2_5": hit = a > h && tot >= 3; break;
+    case "ms2_alt_2_5": hit = a > h && tot <= 2; break;
+    case "ms1_ust_3_5": hit = h > a && tot >= 4; break;
+    case "ms1_alt_3_5": hit = h > a && tot <= 3; break;
+    case "ms2_ust_3_5": hit = a > h && tot >= 4; break;
+    case "ms2_alt_3_5": hit = a > h && tot <= 3; break;
+    case "ust25_kg_var": hit = tot >= 3 && h > 0 && a > 0; break;
+    case "alt25_kg_yok": hit = tot <= 2 && !(h > 0 && a > 0); break;
+    case "alt25_kg_var": hit = tot <= 2 && h > 0 && a > 0; break;
+    case "ust25_kg_yok": hit = tot >= 3 && !(h > 0 && a > 0); break;
+    case "ms1_kg_var": hit = h > a && h > 0 && a > 0; break;
+    case "ms1_kg_yok": hit = h > a && !(h > 0 && a > 0); break;
+    case "ms2_kg_var": hit = a > h && h > 0 && a > 0; break;
+    case "ms2_kg_yok": hit = a > h && !(h > 0 && a > 0); break;
+    case "hnd_m1_1": hit = h - a >= 2; break;
+    case "hnd_p1_2": hit = a - h >= 2; break;
+    case "gol_0_1": hit = tot <= 1; break;
+    case "gol_2_3": hit = tot >= 2 && tot <= 3; break;
+    case "gol_4_5": hit = tot >= 4 && tot <= 5; break;
     default:
       return { state: "pending", locked: false };
   }
@@ -119,6 +205,16 @@ export function evaluatePick(
   else if ((pickKey === "ust_1_5" || pickKey === "alt_1_5") && tot >= 2) locked = true;
   else if ((pickKey === "ust_2_5" || pickKey === "alt_2_5") && tot >= 3) locked = true;
   else if ((pickKey === "ust_3_5" || pickKey === "alt_3_5") && tot >= 4) locked = true;
+  else if ((pickKey === "ust_4_5" || pickKey === "alt_4_5") && tot >= 5) locked = true;
+  else if ((pickKey === "ev_ust_0_5" || pickKey === "ev_alt_0_5") && h >= 1) locked = true;
+  else if ((pickKey === "ev_ust_1_5" || pickKey === "ev_alt_1_5") && h >= 2) locked = true;
+  else if ((pickKey === "ev_ust_2_5" || pickKey === "ev_alt_2_5") && h >= 3) locked = true;
+  else if ((pickKey === "dep_ust_0_5" || pickKey === "dep_alt_0_5") && a >= 1) locked = true;
+  else if ((pickKey === "dep_ust_1_5" || pickKey === "dep_alt_1_5") && a >= 2) locked = true;
+  else if ((pickKey === "dep_ust_2_5" || pickKey === "dep_alt_2_5") && a >= 3) locked = true;
+  else if (pickKey === "gol_0_1" && tot >= 2) locked = true;
+  else if (pickKey === "gol_2_3" && tot >= 4) locked = true;
+  else if (pickKey === "gol_4_5" && tot >= 6) locked = true;
 
   return { state: hit ? "live_won" : "live_lost", locked };
 }
@@ -206,61 +302,15 @@ function parseTopPicksRow(row: any): Array<{ key: string; label_tr: string; fami
     try {
       const arr = typeof row.top_picks_json === "string" ? JSON.parse(row.top_picks_json) : row.top_picks_json;
       if (Array.isArray(arr) && arr.length > 0) {
-        return arr.slice(0, 3);
+        return arr
+          .filter((p: any) => typeof p?.iddaa_odd === "number" && p.iddaa_odd >= 1.3 && p.iddaa_odd <= 3.6)
+          .slice(0, 2);
       }
     } catch {
-      // Fallback below
+      // Ignore malformed JSON
     }
   }
-
-  // Fallback for older rows recorded before migration 0005
-  const cands: Array<{ key: string; label_tr: string; family: string; probability: number; iddaa_odd: number | null }> = [];
-  const p1 = Number(row.prob_home ?? 0);
-  const px = Number(row.prob_draw ?? 0);
-  const p2 = Number(row.prob_away ?? 0);
-  if (p1 + px + p2 > 0) {
-    if (Math.max(p1, p2) >= 0.58) {
-      cands.push(
-        p1 >= p2
-          ? { key: "ms_1", label_tr: "MS 1", family: "side", probability: p1, iddaa_odd: null }
-          : { key: "ms_2", label_tr: "MS 2", family: "side", probability: p2, iddaa_odd: null }
-      );
-    } else if (Math.max(p1 + px, p2 + px) >= 0.65) {
-      cands.push(
-        p1 >= p2
-          ? { key: "dc_1x", label_tr: "1X Çifte Şans", family: "side", probability: Math.min(0.99, p1 + px), iddaa_odd: null }
-          : { key: "dc_x2", label_tr: "X2 Çifte Şans", family: "side", probability: Math.min(0.99, p2 + px), iddaa_odd: null }
-      );
-    } else {
-      cands.push(
-        p1 >= p2 && p1 >= px
-          ? { key: "ms_1", label_tr: "MS 1", family: "side", probability: p1, iddaa_odd: null }
-          : p2 >= p1 && p2 >= px
-          ? { key: "ms_2", label_tr: "MS 2", family: "side", probability: p2, iddaa_odd: null }
-          : { key: "ms_x", label_tr: "MS X", family: "side", probability: px, iddaa_odd: null }
-      );
-    }
-  }
-  if (row.prob_btts_yes !== null && row.prob_btts_yes !== undefined) {
-    const pYes = Number(row.prob_btts_yes);
-    const pNo = 1 - pYes;
-    cands.push(
-      pYes >= pNo
-        ? { key: "kg_var", label_tr: "KG Var", family: "btts", probability: pYes, iddaa_odd: null }
-        : { key: "kg_yok", label_tr: "KG Yok", family: "btts", probability: pNo, iddaa_odd: null }
-    );
-  }
-  if (row.prob_over_25 !== null && row.prob_over_25 !== undefined) {
-    const pO = Number(row.prob_over_25);
-    const pU = 1 - pO;
-    cands.push(
-      pO >= pU
-        ? { key: "ust_2_5", label_tr: "2.5 Üst", family: "ou_25", probability: pO, iddaa_odd: null }
-        : { key: "alt_2_5", label_tr: "2.5 Alt", family: "ou_25", probability: pU, iddaa_odd: null }
-    );
-  }
-  cands.sort((a, b) => b.probability - a.probability);
-  return cands.slice(0, 3);
+  return [];
 }
 
 export async function enrichAndSilentPersist(env: Env, rows: any[]): Promise<any[]> {
@@ -300,7 +350,6 @@ export async function enrichAndSilentPersist(env: Env, rows: any[]): Promise<any
         minute = "MS";
         statusLabel = live.status_label;
 
-        // Silently persist newly finished match_results without sending Telegram notifications
         if (!hasFinResult && row.fixture_id) {
           const outcome = scoreHome > scoreAway ? "1" : scoreAway > scoreHome ? "2" : "X";
           const btts = scoreHome > 0 && scoreAway > 0 ? 1 : 0;
@@ -344,7 +393,7 @@ export async function enrichAndSilentPersist(env: Env, rows: any[]): Promise<any
 
     const basePicks = parseTopPicksRow(row);
     const evaluatedPicks: TopPickItem[] = basePicks.map((p) => {
-      const ev = evaluatePick(p.key, scoreHome, scoreAway, effectiveStatus);
+      const ev = evaluatePick(p.key, scoreHome, scoreAway, effectiveStatus, htHome, htAway, minute);
       return {
         ...p,
         eval_state: ev.state,
@@ -369,9 +418,132 @@ export async function enrichAndSilentPersist(env: Env, rows: any[]): Promise<any
     try {
       await env.DB.batch(dbStatements.slice(0, 40));
     } catch {
-      // Never break API read responses if silent persistence hits a transient conflict
+      // Never break API read responses
     }
   }
 
   return enriched;
+}
+
+export async function enrichCouponsWithLiveScores(env: Env, couponRows: any[]): Promise<any[]> {
+  if (!couponRows.length) return [];
+
+  const parsedCoupons = couponRows.map((c) => {
+    let legs: any[] = [];
+    try {
+      legs = typeof c.legs_json === "string" ? JSON.parse(c.legs_json) : c.legs_json || [];
+    } catch {
+      legs = [];
+    }
+    return { ...c, legs };
+  });
+
+  const fixtureIds = Array.from(
+    new Set(parsedCoupons.flatMap((c) => c.legs.map((l: any) => l.fixture_id)).filter(Boolean))
+  );
+  const dateSet = new Set<string>([getIstanbulDates().todayTr, getIstanbulDates().yesterdayTr]);
+  for (const c of parsedCoupons) {
+    if (c.analysis_day_tr) dateSet.add(String(c.analysis_day_tr));
+    for (const l of c.legs) {
+      if (typeof l.kickoff_tr === "string" && l.kickoff_tr.length >= 10) {
+        dateSet.add(l.kickoff_tr.slice(0, 10));
+      }
+    }
+  }
+
+  const dbFixtureMap = new Map<string, any>();
+  if (fixtureIds.length > 0) {
+    const placeholders = fixtureIds.map(() => "?").join(",");
+    const dbRes = await env.DB.prepare(
+      `SELECT f.fixture_id, f.iddaa_event_id, f.status, f.live_home_goals, f.live_away_goals,
+              f.live_ht_home_goals, f.live_ht_away_goals, f.live_minute,
+              mr.home_goals AS fin_home_goals, mr.away_goals AS fin_away_goals,
+              mr.ht_home_goals AS fin_ht_home_goals, mr.ht_away_goals AS fin_ht_away_goals
+       FROM fixtures f
+       LEFT JOIN match_results mr ON f.fixture_id = mr.fixture_id
+       WHERE f.fixture_id IN (${placeholders})`
+    )
+      .bind(...fixtureIds)
+      .all();
+    for (const r of dbRes.results || []) {
+      dbFixtureMap.set(String((r as any).fixture_id), r);
+    }
+  }
+
+  const liveMap = await fetchIddaaLiveScores(Array.from(dateSet).slice(0, 5));
+
+  return parsedCoupons.map((c) => {
+    let wonLegs = 0;
+    let lostLegs = 0;
+    let liveWonLegs = 0;
+    let liveLostLegs = 0;
+    let pendingLegs = 0;
+
+    const evaluatedLegs = c.legs.map((leg: any) => {
+      const fx = dbFixtureMap.get(String(leg.fixture_id || ""));
+      const eid = String(leg.iddaa_event_id || fx?.iddaa_event_id || "");
+      const live = eid ? liveMap[eid] : undefined;
+
+      const hasFin = fx?.fin_home_goals !== null && fx?.fin_home_goals !== undefined;
+      let status: string = hasFin ? "finished" : fx?.status || "scheduled";
+      let hg: number | null = hasFin ? Number(fx.fin_home_goals) : fx?.live_home_goals ?? null;
+      let ag: number | null = hasFin ? Number(fx.fin_away_goals) : fx?.live_away_goals ?? null;
+      let htH: number | null = hasFin ? fx?.fin_ht_home_goals ?? null : fx?.live_ht_home_goals ?? null;
+      let htA: number | null = hasFin ? fx?.fin_ht_away_goals ?? null : fx?.live_ht_away_goals ?? null;
+      let minute: string | null = hasFin ? "MS" : fx?.live_minute ?? null;
+
+      if (live && live.home_goals !== null && live.away_goals !== null) {
+        if (live.status === "finished") {
+          status = "finished";
+          hg = live.home_goals;
+          ag = live.away_goals;
+          htH = live.ht_home_goals ?? htH;
+          htA = live.ht_away_goals ?? htA;
+          minute = "MS";
+        } else if (live.status === "live" && !hasFin) {
+          status = "live";
+          hg = live.home_goals;
+          ag = live.away_goals;
+          htH = live.ht_home_goals ?? htH;
+          htA = live.ht_away_goals ?? htA;
+          minute = live.minute;
+        }
+      }
+
+      const ev = evaluatePick(String(leg.pick_key || ""), hg, ag, status, htH, htA, minute);
+      if (ev.state === "won") wonLegs += 1;
+      else if (ev.state === "lost") lostLegs += 1;
+      else if (ev.state === "live_won") liveWonLegs += 1;
+      else if (ev.state === "live_lost") liveLostLegs += 1;
+      else pendingLegs += 1;
+
+      return {
+        ...leg,
+        effective_status: status,
+        score_home: hg,
+        score_away: ag,
+        ht_home: htH,
+        ht_away: htA,
+        live_minute: minute,
+        eval_state: ev.state,
+        locked: ev.locked,
+      };
+    });
+
+    let couponStatus = "pending";
+    if (lostLegs > 0) couponStatus = "lost";
+    else if (wonLegs === evaluatedLegs.length && evaluatedLegs.length > 0) couponStatus = "won";
+    else if (liveWonLegs > 0 || liveLostLegs > 0 || wonLegs > 0) couponStatus = "live";
+
+    return {
+      ...c,
+      legs: evaluatedLegs,
+      effective_status: couponStatus,
+      won_legs: wonLegs,
+      lost_legs: lostLegs,
+      live_won_legs: liveWonLegs,
+      live_lost_legs: liveLostLegs,
+      pending_legs: pendingLegs,
+    };
+  });
 }

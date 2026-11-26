@@ -15,8 +15,9 @@ from backend.telegram.security import extract_actor_from_update, is_authorized_t
 COMMAND_HELP = [
     ("/start", "Sistemi başlat ve yetkiyi doğrula."),
     ("/menu", "Dokunulabilir ana menüyü aç."),
-    ("/bugun", "Seçilen 15 maç ve en yüksek 3 olasılığı."),
+    ("/bugun", "Seçilen 15 maç ve en değerli 2 gerçek oranlı olasılık."),
     ("/top15", "Seçilen 15 maçın özetini gösterir."),
+    ("/kuponlarim", "Günün 2 adet 4 maçlık kuponunu gösterir."),
     ("/canli", "Başlamış maçların anlık canlı skoru ve tutma durumu."),
     ("/yarin", "Mevcut ertesi gün fikstürü."),
     ("/analiz", "Takım veya maç adıyla manuel araştırma kuyruğu."),
@@ -72,6 +73,8 @@ class TelegramCommandRouter:
             "/menu": self._cmd_menu,
             "/bugun": self._cmd_bugun,
             "/top15": self._cmd_bugun,
+            "/kuponlarim": self._cmd_kuponlarim,
+            "/kupon": self._cmd_kuponlarim,
             "/canli": self._cmd_canli,
             "/yarin": self._cmd_yarin,
             "/analiz": self._cmd_analiz,
@@ -125,21 +128,59 @@ class TelegramCommandRouter:
             try:
                 parsed = json.loads(raw) if isinstance(raw, str) else raw
                 if isinstance(parsed, list) and parsed:
-                    return parsed[:3]
+                    with_odds = [p for p in parsed if isinstance(p.get("iddaa_odd"), (int, float))]
+                    return with_odds[:2]
             except Exception:
                 pass
         return []
 
-    def _format_picks_with_status(self, picks: list[dict[str, Any]], hg: int | None, ag: int | None, st: str) -> str:
+    def _format_picks_with_status(
+        self,
+        picks: list[dict[str, Any]],
+        hg: int | None,
+        ag: int | None,
+        st: str,
+        ht_hg: int | None = None,
+        ht_ag: int | None = None,
+        live_minute: str | None = None,
+    ) -> str:
         if not picks:
             return "-"
         parts: list[str] = []
-        for p in picks[:3]:
-            ev = evaluate_pick_outcome(str(p.get("key") or ""), hg, ag, st)
+        for p in picks[:2]:
+            ev = evaluate_pick_outcome(
+                str(p.get("key") or ""),
+                hg,
+                ag,
+                st,
+                ht_home_goals=ht_hg,
+                ht_away_goals=ht_ag,
+                live_minute=live_minute,
+            )
             icon = "🟢" if ev["status"] in ("won", "live_won") else ("🔴" if ev["status"] in ("lost", "live_lost") else "⏳")
             pct = int(round(float(p.get("probability", 0)) * 100))
-            parts.append(f"{icon} {p.get('label_tr')}: `%{pct}`")
+            odd = p.get("iddaa_odd")
+            odd_str = f" ({float(odd):.2f})" if isinstance(odd, (int, float)) else ""
+            parts.append(f"{icon} {p.get('label_tr')}: `%{pct}`{odd_str}")
         return " | ".join(parts)
+
+    def _cmd_kuponlarim(self, _: str) -> tuple[str, dict]:
+        coupons = self.repo.list_daily_coupons(limit=4)
+        if not coupons:
+            return ("🎟️ Henüz oluşturulmuş günlük kupon bulunmuyor. *⚡ Şimdi Analiz Et* ile oluşturabilirsiniz.", main_menu_keyboard())
+        latest_day = coupons[0]["analysis_day_tr"]
+        day_coupons = [c for c in coupons if c["analysis_day_tr"] == latest_day][:2]
+        lines = [f"🎟️ *Kuponlarım ({latest_day})*"]
+        for c in day_coupons:
+            icon = "🛡️" if c.get("coupon_type") == "balanced" else "🚀"
+            lines.append(f"\n{icon} *{c['title_tr']}* — Toplam Oran: *{float(c['total_odd']):.2f}*")
+            legs = json.loads(c["legs_json"]) if isinstance(c["legs_json"], str) else c["legs_json"]
+            for i, leg in enumerate(legs or [], 1):
+                code = leg.get("iddaa_match_code") or "-"
+                lines.append(
+                    f"  {i}. `[{code}]` {leg.get('home_team')} - {leg.get('away_team')} → *{leg.get('label_tr')}* ({float(leg.get('iddaa_odd', 0)):.2f})"
+                )
+        return ("\n".join(lines), main_menu_keyboard())
 
     def _cmd_bugun(self, _: str) -> tuple[str, dict]:
         today_tr = datetime.now(ISTANBUL_TZ).date().isoformat()
@@ -180,9 +221,9 @@ class TelegramCommandRouter:
             score_tag = f" | Skor: *{hg}-{ag}*" if hg is not None and ag is not None else ""
             picks = self._parse_picks(r)
             picks_txt = (
-                self._format_picks_with_status(picks, hg, ag, st)
+                self._format_picks_with_status(picks, hg, ag, st, live_minute=r.get("live_minute"))
                 if picks
-                else f"1-X-2: `%{int(r['prob_home']*100)}/%{int(r['prob_draw']*100)}/%{int(r['prob_away']*100)}`"
+                else "Oran aralığında uygun seçim yok"
             )
             lines.append(
                 f"{i}. `[Kod: {code}]` *{r['home_team_name']} - {r['away_team_name']}* ({r['kickoff_tr'][11:16]}{score_tag})\n"

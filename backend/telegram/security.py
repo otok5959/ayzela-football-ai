@@ -1,4 +1,4 @@
-"""Single-user Telegram security verification (User ID, Chat ID, Webhook Secret)."""
+"""Multi-user Telegram security verification (User ID, Chat ID, Subscribers table, Webhook Secret)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,12 @@ from typing import Any
 
 from backend.config import get_settings
 from backend.database.repositories import AyzelaRepository
+
+
+def _split_ids(raw: str | None) -> list[str]:
+    if not raw:
+        return []
+    return [part.strip() for part in str(raw).split(",") if part.strip()]
 
 
 def verify_webhook_secret(header_secret: str | None) -> bool:
@@ -25,20 +31,32 @@ def is_authorized_telegram_actor(
     allowed_chat_id: str | None = None,
     repo: AyzelaRepository | None = None,
 ) -> bool:
-    settings = get_settings()
-    exp_user = (allowed_user_id if allowed_user_id is not None else settings.telegram_allowed_user_id).strip()
-    exp_chat = (allowed_chat_id if allowed_chat_id is not None else settings.telegram_chat_id).strip()
-
-    if not exp_user or not exp_chat:
+    if user_id is None or chat_id is None:
         return False
+    uid_str = str(user_id).strip()
+    cid_str = str(chat_id).strip()
 
-    ok = str(user_id) == exp_user and str(chat_id) == exp_chat
+    settings = get_settings()
+    exp_users = _split_ids(allowed_user_id if allowed_user_id is not None else settings.telegram_allowed_user_id)
+    exp_chats = _split_ids(allowed_chat_id if allowed_chat_id is not None else settings.telegram_chat_id)
+
+    ok = bool(exp_users and exp_chats and uid_str in exp_users and cid_str in exp_chats)
+
+    if not ok and repo is not None:
+        subs = repo.list_telegram_subscribers(enabled_only=True)
+        for s in subs:
+            if str(s.get("telegram_user_id") or "").strip() == uid_str:
+                sub_chat = str(s.get("chat_id") or uid_str).strip()
+                if sub_chat == cid_str or uid_str == cid_str:
+                    ok = True
+                    break
+
     if not ok and repo:
         repo.log(
             "SECURITY",
             "telegram.security",
             "Yetkisiz Telegram erişim girişimi engellendi",
-            {"user_id": str(user_id), "chat_id": str(chat_id)},
+            {"user_id": uid_str, "chat_id": cid_str},
         )
     return ok
 

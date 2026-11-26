@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from backend.analytics.top_picks import compute_market_family_weights
 from backend.backtesting.metrics import compute_evaluation_metrics
 from backend.collectors.failover_manager import MultiSourceFailoverManager
 from backend.collectors.team_matcher import teams_match
@@ -102,7 +103,12 @@ def sync_results_and_compute_metrics(
                 break
 
     metrics_updated = recompute_period_metrics(repo)
-    return {"synced_results": synced_count, "metrics_periods_updated": metrics_updated}
+    learned_weights = compute_market_family_weights(repo)
+    return {
+        "synced_results": synced_count,
+        "metrics_periods_updated": metrics_updated,
+        "learned_families": len(learned_weights),
+    }
 
 
 def recompute_period_metrics(repo: AyzelaRepository, ref_dt_tr: datetime | None = None) -> int:
@@ -131,7 +137,7 @@ def recompute_period_metrics(repo: AyzelaRepository, ref_dt_tr: datetime | None 
     ]
 
     updated = 0
-    now_utc = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    now_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     for p_type, p_key, rows in periods:
         if not rows:
             continue

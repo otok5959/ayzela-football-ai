@@ -575,3 +575,128 @@ class AyzelaRepository:
         )
         rows = self.db.execute("SELECT * FROM usage_limits WHERE resource_key = ?", (resource_key,))
         return rows[0] if rows else None
+
+    # --- Daily Auto-Coupons ---
+    def save_daily_coupons(self, analysis_day_tr: str, coupons: list[dict[str, Any]], is_demo: bool = False) -> None:
+        demo_flag = 1 if is_demo else 0
+        self.db.execute(
+            "DELETE FROM daily_coupons WHERE analysis_day_tr = ? AND is_demo = ?",
+            (analysis_day_tr, demo_flag),
+        )
+        for c in coupons:
+            self.db.execute(
+                """
+                INSERT INTO daily_coupons (
+                    coupon_id, analysis_day_tr, run_id, coupon_slot, coupon_type,
+                    title_tr, total_odd, combined_probability, legs_json, status,
+                    is_demo, created_at_utc
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    c["coupon_id"],
+                    analysis_day_tr,
+                    c["run_id"],
+                    int(c["coupon_slot"]),
+                    c["coupon_type"],
+                    c["title_tr"],
+                    float(c["total_odd"]),
+                    float(c["combined_probability"]),
+                    json.dumps(c["legs"], ensure_ascii=False),
+                    c.get("status") or "pending",
+                    demo_flag,
+                    c.get("created_at_utc") or utc_now_iso(),
+                ),
+            )
+
+    def list_daily_coupons(self, analysis_day_tr: str | None = None, limit: int = 10) -> list[dict[str, Any]]:
+        if analysis_day_tr:
+            return self.db.execute(
+                """
+                SELECT * FROM daily_coupons
+                WHERE is_demo = 0 AND analysis_day_tr = ?
+                ORDER BY coupon_slot ASC, created_at_utc DESC
+                LIMIT ?
+                """,
+                (analysis_day_tr, limit),
+            )
+        return self.db.execute(
+            """
+            SELECT * FROM daily_coupons
+            WHERE is_demo = 0
+            ORDER BY analysis_day_tr DESC, coupon_slot ASC, created_at_utc DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+
+    # --- Market Learning Weights ---
+    def get_market_learning_weights(self) -> dict[str, float]:
+        try:
+            rows = self.db.execute("SELECT family, weight FROM market_learning_weights")
+            return {str(r["family"]): float(r["weight"]) for r in rows}
+        except Exception:
+            return {}
+
+    def upsert_market_learning_weight(
+        self,
+        family: str,
+        sample_count: int,
+        hit_rate: float,
+        avg_odd: float,
+        roi: float,
+        weight: float,
+    ) -> None:
+        self.db.execute(
+            """
+            INSERT INTO market_learning_weights (
+                family, sample_count, hit_rate, avg_odd, roi, weight, updated_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(family) DO UPDATE SET
+                sample_count = excluded.sample_count,
+                hit_rate = excluded.hit_rate,
+                avg_odd = excluded.avg_odd,
+                roi = excluded.roi,
+                weight = excluded.weight,
+                updated_at_utc = excluded.updated_at_utc
+            """,
+            (family, sample_count, hit_rate, avg_odd, roi, weight, utc_now_iso()),
+        )
+
+    # --- Telegram Multi-User Subscribers ---
+    def list_telegram_subscribers(self, enabled_only: bool = True) -> list[dict[str, Any]]:
+        try:
+            if enabled_only:
+                return self.db.execute("SELECT * FROM telegram_subscribers WHERE enabled = 1 ORDER BY created_at_utc ASC")
+            return self.db.execute("SELECT * FROM telegram_subscribers ORDER BY created_at_utc ASC")
+        except Exception:
+            return []
+
+    def upsert_telegram_subscriber(
+        self,
+        telegram_user_id: str,
+        chat_id: str | None = None,
+        display_name: str = "",
+        role: str = "member",
+        enabled: bool = True,
+    ) -> None:
+        uid = str(telegram_user_id).strip()
+        cid = str(chat_id or uid).strip()
+        self.db.execute(
+            """
+            INSERT INTO telegram_subscribers (
+                telegram_user_id, chat_id, display_name, role, enabled, created_at_utc
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(telegram_user_id) DO UPDATE SET
+                chat_id = excluded.chat_id,
+                display_name = CASE WHEN excluded.display_name != '' THEN excluded.display_name ELSE telegram_subscribers.display_name END,
+                role = excluded.role,
+                enabled = excluded.enabled
+            """,
+            (uid, cid, display_name.strip(), role, 1 if enabled else 0, utc_now_iso()),
+        )
+
+    def remove_telegram_subscriber(self, telegram_user_id: str) -> None:
+        self.db.execute(
+            "UPDATE telegram_subscribers SET enabled = 0 WHERE telegram_user_id = ?",
+            (str(telegram_user_id).strip(),),
+        )

@@ -32,7 +32,7 @@ def predict_from_market_odds(iddaa_odds: dict[str, Any] | None) -> dict[str, Any
     overround = inv_h + inv_d + inv_a
     p_h, p_d, p_a = inv_h / overround, inv_d / overround, inv_a / overround
 
-    # Infer total expected goals from real O/U 2.5 odds if present, else conservative 2.65
+    # Infer total expected goals from real O/U 2.5 (and refine with O/U 1.5 / BTTS if available)
     total_lam = 2.65
     if "ou_25" in iddaa_odds:
         try:
@@ -42,6 +42,25 @@ def predict_from_market_odds(iddaa_odds: dict[str, Any] | None) -> dict[str, Any
                 p_over = (1.0 / ov) / ((1.0 / u) + (1.0 / ov))
                 # Monotonic calibration mapping p_over(2.5) in [0.25, 0.80] -> total lambda in [1.85, 3.65]
                 total_lam = float(np.clip(1.65 + 2.2 * p_over, 1.7, 3.8))
+        except Exception:
+            pass
+    elif "ou_15" in iddaa_odds:
+        try:
+            u15 = float(iddaa_odds["ou_15"]["under"])
+            ov15 = float(iddaa_odds["ou_15"]["over"])
+            if u15 > 1.0 and ov15 > 1.0:
+                p_over15 = (1.0 / ov15) / ((1.0 / u15) + (1.0 / ov15))
+                total_lam = float(np.clip(1.25 + 2.1 * p_over15, 1.6, 3.5))
+        except Exception:
+            pass
+
+    if "btts" in iddaa_odds:
+        try:
+            y = float(iddaa_odds["btts"]["yes"])
+            n = float(iddaa_odds["btts"]["no"])
+            if y > 1.0 and n > 1.0:
+                p_btts = (1.0 / y) / ((1.0 / y) + (1.0 / n))
+                total_lam = float(np.clip(0.8 * total_lam + 0.2 * (1.7 + 1.9 * p_btts), 1.6, 3.8))
         except Exception:
             pass
 

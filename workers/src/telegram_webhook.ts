@@ -1,19 +1,27 @@
 import { Env } from "./auth";
 import { dispatchGithubWorkflow } from "./github_dispatch";
-import { enrichAndSilentPersist, getIstanbulDates, TopPickItem } from "./live_scores";
+import { enrichAndSilentPersist, enrichCouponsWithLiveScores, getIstanbulDates, TopPickItem } from "./live_scores";
 
 interface TelegramUpdate {
   message?: {
-    from?: { id?: number };
+    from?: { id?: number; first_name?: string; username?: string };
     chat?: { id?: number };
     text?: string;
   };
   callback_query?: {
     id: string;
-    from?: { id?: number };
+    from?: { id?: number; first_name?: string; username?: string };
     message?: { chat?: { id?: number } };
     data?: string;
   };
+}
+
+function splitIds(raw?: string): string[] {
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 function mainKeyboard() {
@@ -22,16 +30,17 @@ function mainKeyboard() {
       [{ text: "⚡ Şimdi Analiz Et", callback_data: "/simdi_analiz" }],
       [
         { text: "🎯 Seçilen 15 Maç", callback_data: "/bugun" },
+        { text: "🎟️ Kuponlarım", callback_data: "/kuponlarim" },
+      ],
+      [
         { text: "🔴 Canlı Sonuçlar", callback_data: "/canli" },
-      ],
-      [
         { text: "🏁 Sonuçlar", callback_data: "/sonuclar" },
-        { text: "📅 Yarın Fikstürü", callback_data: "/yarin" },
       ],
       [
+        { text: "📅 Yarın Fikstürü", callback_data: "/yarin" },
         { text: "🩺 Kaynak Sağlığı", callback_data: "/kaynaklar" },
-        { text: "🖥️ Web Panel", callback_data: "/panel" },
       ],
+      [{ text: "🖥️ Web Panel", callback_data: "/panel" }],
     ],
   };
 }
@@ -39,7 +48,7 @@ function mainKeyboard() {
 function formatPicksLine(picks: TopPickItem[]): string {
   if (!picks?.length) return "-";
   return picks
-    .slice(0, 3)
+    .slice(0, 2)
     .map((p) => {
       const icon =
         p.eval_state === "won" || p.eval_state === "live_won"
@@ -85,17 +94,57 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
   }
 
   const update = (await request.json()) as TelegramUpdate;
-  const uid = update.message?.from?.id ?? update.callback_query?.from?.id;
+  const fromObj = update.message?.from ?? update.callback_query?.from;
+  const uid = fromObj?.id;
   const cid = update.message?.chat?.id ?? update.callback_query?.message?.chat?.id;
   const rawText = (update.message?.text ?? update.callback_query?.data ?? "").trim();
 
-  if (String(uid) !== String(env.TELEGRAM_ALLOWED_USER_ID) || String(cid) !== String(env.TELEGRAM_CHAT_ID)) {
+  const uidStr = uid !== undefined ? String(uid) : "";
+  const cidStr = cid !== undefined ? String(cid) : "";
+
+  const allowedUsers = splitIds(env.TELEGRAM_ALLOWED_USER_ID);
+  const allowedChats = splitIds(env.TELEGRAM_CHAT_ID);
+  const primaryAdminId = allowedUsers[0] || "";
+
+  let isAuthorized = Boolean(uidStr && cidStr && allowedUsers.includes(uidStr) && allowedChats.includes(cidStr));
+  if (!isAuthorized && uidStr && cidStr) {
+    try {
+      const subRow = await env.DB.prepare(
+        "SELECT telegram_user_id, chat_id FROM telegram_subscribers WHERE telegram_user_id = ? AND enabled = 1"
+      )
+        .bind(uidStr)
+        .first<{ telegram_user_id?: string; chat_id?: string }>();
+      if (subRow?.telegram_user_id && (subRow.chat_id === cidStr || uidStr === cidStr)) {
+        isAuthorized = true;
+      }
+    } catch {
+      // Migration 0006 may not be applied yet
+    }
+  }
+
+  if (!isAuthorized) {
     await env.DB.prepare(
       "INSERT INTO system_logs (level, module, message, details_json, created_at_utc) VALUES ('SECURITY', 'worker.telegram', 'Yetkisiz Telegram erişimi reddedildi', ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
     )
-      .bind(JSON.stringify({ uid, cid }))
+      .bind(
+        JSON.stringify({
+          uid: uidStr,
+          cid: cidStr,
+          name: fromObj?.first_name || "",
+          username: fromObj?.username || "",
+        })
+      )
       .run();
-    return new Response("Unauthorized", { status: 403 });
+
+    if (cidStr) {
+      await sendTelegramReply(
+        env,
+        cidStr,
+        `⛔ Erişim izniniz henüz tanımlı değil.\nYöneticiye iletmeniz gereken Telegram ID: \`${uidStr || "-"}\``,
+        false
+      );
+    }
+    return Response.json({ ok: false, unauthorized: true });
   }
 
   if (update.callback_query?.id) {
@@ -105,25 +154,100 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
   const [rawCmd, ...rest] = rawText.split(/\s+/);
   const cmd = (rawCmd || "/menu").split("@")[0].toLowerCase();
   const arg = rest.join(" ").trim();
-  const chatStr = String(cid);
+  const chatStr = cidStr;
 
   let reply = "ℹ️ Komut listesi için /yardim yazabilirsiniz.";
 
   if (cmd === "/start" || cmd === "/menu") {
     reply =
       "⚽ *AyzEla Football AI* aktif.\n" +
-      "Günlük seçilmiş 15 maç (en yüksek 3 olasılık) ve canlı skor takibi hazır. İstediğiniz an *⚡ Şimdi Analiz Et* butonuna basabilirsiniz.";
+      "Günlük seçilen 15 maç (gerçek 1.30-3.60 oranlı en değerli 2 olasılık), günlük 2 adet 4'lü kupon ve canlı skor takibi hazır.";
+  } else if (cmd === "/kullanici_ekle") {
+    if (uidStr !== primaryAdminId) {
+      reply = "⛔ Bu komutu yalnızca ana yönetici kullanabilir.";
+    } else if (!rest[0] || !/^\d+$/.test(rest[0])) {
+      reply = "Kullanım: `/kullanici_ekle 123456789 İsim`";
+    } else {
+      const targetId = rest[0];
+      const dispName = rest.slice(1).join(" ").trim() || `Kullanıcı ${targetId}`;
+      await env.DB.prepare(
+        `INSERT INTO telegram_subscribers (telegram_user_id, chat_id, display_name, role, enabled, created_at_utc)
+         VALUES (?, ?, ?, 'member', 1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+         ON CONFLICT(telegram_user_id) DO UPDATE SET enabled = 1, chat_id = excluded.chat_id, display_name = excluded.display_name`
+      )
+        .bind(targetId, targetId, dispName)
+        .run();
+      reply = `✅ *Telegram kullanıcısı eklendi:* \`${targetId}\` (${dispName})`;
+    }
+  } else if (cmd === "/kullanici_sil") {
+    if (uidStr !== primaryAdminId) {
+      reply = "⛔ Bu komutu yalnızca ana yönetici kullanabilir.";
+    } else if (!rest[0]) {
+      reply = "Kullanım: `/kullanici_sil 123456789`";
+    } else {
+      await env.DB.prepare("UPDATE telegram_subscribers SET enabled = 0 WHERE telegram_user_id = ?")
+        .bind(rest[0].trim())
+        .run();
+      reply = `🗑️ Kullanıcı erişimi kaldırıldı: \`${rest[0].trim()}\``;
+    }
   } else if (cmd === "/simdi_analiz") {
     const jobId = `job_${crypto.randomUUID().slice(0, 10)}`;
     await env.DB.prepare(
       "INSERT INTO job_queue (job_id, job_type, payload_json, requested_by_telegram_id, status, created_at_utc) VALUES (?, 'manual_analysis', ?, ?, 'queued', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
     )
-      .bind(jobId, JSON.stringify({ mode: "full_now" }), String(uid))
+      .bind(jobId, JSON.stringify({ mode: "full_now" }), uidStr)
       .run();
     const disp = await dispatchGithubWorkflow(env, "manual_dispatch.yml", { job_id: jobId, task: "full_now" });
     reply = disp.ok
-      ? `⚡ *Anlık analiz başlatıldı!*\nİş No: \`${jobId}\`\nTüm İddaa bülteni taranıp seçilmiş 15 maç raporu buraya ve web paneline düşecektir.`
+      ? `⚡ *Anlık analiz başlatıldı!*\nİş No: \`${jobId}\`\nTüm İddaa bülteni taranıp seçilen 15 maç ve kuponlar hazırlanacaktır.`
       : `⚠️ İş kuyruğa eklendi (\`${jobId}\`) ancak GitHub Actions tetiklenemedi: ${disp.detail}`;
+  } else if (cmd === "/kuponlarim" || cmd === "/kupon") {
+    try {
+      const cRows = await env.DB.prepare(
+        "SELECT * FROM daily_coupons WHERE is_demo = 0 ORDER BY analysis_day_tr DESC, coupon_slot ASC, created_at_utc DESC LIMIT 6"
+      ).all();
+      const rawList = cRows.results || [];
+      if (!rawList.length) {
+        reply = "🎟️ Henüz oluşturulmuş günlük kupon yok. *⚡ Şimdi Analiz Et* butonuna basabilirsiniz.";
+      } else {
+        const latestDay = String((rawList[0] as any).analysis_day_tr || "");
+        const dayRows = rawList.filter((r: any) => String(r.analysis_day_tr) === latestDay).slice(0, 2);
+        const enriched = await enrichCouponsWithLiveScores(env, dayRows);
+        const outLines: string[] = [`🎟️ *Kuponlarım (${latestDay})*`];
+        for (const c of enriched) {
+          const icon = c.coupon_type === "balanced" ? "🛡️" : "🚀";
+          const stLabel =
+            c.effective_status === "won"
+              ? "✅ Tuttu"
+              : c.effective_status === "lost"
+              ? "❌ Tutmadı"
+              : c.effective_status === "live"
+              ? `🟡 ${c.won_legs + c.live_won_legs}/4`
+              : "⏳ Bekliyor";
+          outLines.push(`\n${icon} *${c.title_tr}* — Oran: *${Number(c.total_odd).toFixed(2)}* (${stLabel})`);
+          for (let i = 0; i < (c.legs || []).length; i++) {
+            const leg = c.legs[i];
+            const legIcon =
+              leg.eval_state === "won" || leg.eval_state === "live_won"
+                ? "🟢"
+                : leg.eval_state === "lost" || leg.eval_state === "live_lost"
+                ? "🔴"
+                : "⏳";
+            const sc =
+              leg.score_home !== null && leg.score_home !== undefined
+                ? ` (${leg.score_home}-${leg.score_away})`
+                : "";
+            outLines.push(
+              `  ${i + 1}. ${legIcon} \`[${leg.iddaa_match_code || "-"}]\` ${leg.home_team} - ${leg.away_team}${sc}\n     → *${leg.label_tr}* (${Number(leg.iddaa_odd).toFixed(2)})`
+            );
+          }
+        }
+        outLines.push(`\n🖥️ Detaylı Kupon Takibi: ${env.PANEL_ORIGIN}`);
+        reply = outLines.join("\n").slice(0, 3850);
+      }
+    } catch {
+      reply = "🎟️ Kupon tablosu henüz hazırlanmadı. Lütfen güncel analizi bekleyin.";
+    }
   } else if (cmd === "/panel") {
     reply = `🖥️ *Web Yönetim Paneli*\n${env.PANEL_ORIGIN}`;
   } else if (cmd === "/ligler") {
@@ -189,7 +313,8 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
     const res = await env.DB.prepare(
       `SELECT f.*, mp.prob_home, mp.prob_draw, mp.prob_away, mp.prob_btts_yes, mp.prob_over_25,
               mp.top_picks_json, mp.is_selected_top15,
-              mr.home_goals AS fin_home_goals, mr.away_goals AS fin_away_goals
+              mr.home_goals AS fin_home_goals, mr.away_goals AS fin_away_goals,
+              mr.ht_home_goals AS fin_ht_home_goals, mr.ht_away_goals AS fin_ht_away_goals
        FROM fixtures f
        JOIN match_predictions mp ON f.fixture_id = mp.fixture_id
          AND mp.created_at_utc = (
@@ -224,11 +349,11 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
     }
   } else if (cmd === "/sonuclar") {
     const { todayTr, yesterdayTr } = getIstanbulDates();
-    // Trigger live-results check first so newly finished matches persist silently before displaying
     const recentRes = await env.DB.prepare(
       `SELECT f.*, mp.prob_home, mp.prob_draw, mp.prob_away, mp.prob_btts_yes, mp.prob_over_25,
               mp.top_picks_json, mp.is_selected_top15,
-              mr.home_goals AS fin_home_goals, mr.away_goals AS fin_away_goals
+              mr.home_goals AS fin_home_goals, mr.away_goals AS fin_away_goals,
+              mr.ht_home_goals AS fin_ht_home_goals, mr.ht_away_goals AS fin_ht_away_goals
        FROM fixtures f
        JOIN match_predictions mp ON f.fixture_id = mp.fixture_id
          AND mp.created_at_utc = (
@@ -294,7 +419,7 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
       await env.DB.prepare(
         "INSERT INTO job_queue (job_id, job_type, payload_json, requested_by_telegram_id, status, created_at_utc) VALUES (?, 'manual_analysis', ?, ?, 'queued', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
       )
-        .bind(jobId, JSON.stringify({ query: arg }), String(uid))
+        .bind(jobId, JSON.stringify({ query: arg }), uidStr)
         .run();
       await dispatchGithubWorkflow(env, "manual_dispatch.yml", { job_id: jobId, task: "manual_analysis" });
       reply = `⏳ *Manuel araştırma kuyruğa eklendi*\nSorgu: \`${arg}\`\nİş No: \`${jobId}\`\nTamamlandığında sonuç gönderilecektir.`;
@@ -306,7 +431,7 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
       (lims.results || []).map((l: any) => `- ${l.label_tr}: \`${l.used_amount}/${l.max_limit}\``).join("\n");
   } else if (cmd === "/yardim") {
     reply =
-      "ℹ️ *Komutlar*: /start /menu /bugun /top15 /canli /sonuclar /yarin /analiz /simdi_analiz /kadro /haberler /gunluk /haftalik /aylik /rapor /ligler /kaynaklar /durum /panel /ayarlar /yardim";
+      "ℹ️ *Komutlar*: /start /menu /bugun /top15 /kuponlarim /canli /sonuclar /yarin /analiz /simdi_analiz /ligler /kaynaklar /durum /panel /kullanici_ekle /kullanici_sil /yardim";
   }
 
   await sendTelegramReply(env, chatStr, reply, true);

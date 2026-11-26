@@ -8,6 +8,7 @@ from typing import Any
 
 from backend.agents.agent_01_bulletin import filter_and_dedup_bulletin
 from backend.agents.orchestrator import analyze_single_fixture
+from backend.analytics.coupons import build_daily_coupons
 from backend.analytics.report_formatter import format_daily_report_tr
 from backend.analytics.top_picks import select_daily_top15
 from backend.collectors.failover_manager import MultiSourceFailoverManager
@@ -123,8 +124,23 @@ def run_daily_analysis(
     history_cache: dict[str, list[HistoricalMatch]] = {}
     standings_cache: dict[str, list[TeamStandingRow]] = {}
     bundles: list[MatchPredictionBundle] = []
+    family_weights = repo.get_market_learning_weights()
 
-    # Respect daily distinct match cap (max 10 distinct matches per analysis_day_tr)
+    # Enrich top 30 scheduled candidates with full 50+ Iddaa markets
+    if hasattr(failover.iddaa, "enrich_event_odds"):
+        scheduled_indices = [
+            idx
+            for idx, fx in enumerate(candidates)
+            if fx.status == "scheduled" and fx.iddaa_event_id
+        ]
+        scheduled_indices.sort(
+            key=lambda i: len(candidates[i].available_markets or []),
+            reverse=True,
+        )
+        for idx in scheduled_indices[:30]:
+            candidates[idx] = failover.iddaa.enrich_event_odds(candidates[idx])
+
+    # Respect daily distinct match cap
     existing_day_fixtures = {
         r["fixture_id"]
         for r in repo.db.execute(
@@ -163,14 +179,15 @@ def run_daily_analysis(
             news_items=news_items,
             standings=standings_cache.get(fx.organization_id),
             weather=weather,
+            family_weights=family_weights,
         )
         if bundle is not None:
             bundles.append(bundle)
 
-    # Sort by data_coverage_score & research_quality_score, enforce max 10 cap
+    # Sort by data_coverage_score & research_quality_score, enforce max cap
     bundles.sort(key=lambda b: (b.data_coverage_score, b.research_quality_score), reverse=True)
     if run_type == "midday_1159" and existing_day_fixtures:
-        # Midday 11:59 can re-analyze same day fixtures and add new ones up to total 10 distinct
+        # Midday 11:59 can re-analyze same day fixtures and add new ones up to daily_max_matches
         remaining_new = max(settings.daily_max_matches - len(existing_day_fixtures), 0)
         selected: list[MatchPredictionBundle] = []
         new_added = 0
@@ -184,7 +201,15 @@ def run_daily_analysis(
     else:
         bundles = bundles[: settings.daily_max_matches]
 
-    select_daily_top15(bundles, limit=15)
+    select_daily_top15(bundles, limit=15, family_weights=family_weights)
+    coupons = build_daily_coupons(
+        bundles=bundles,
+        analysis_day_tr=win.analysis_day_tr,
+        run_id=run_id,
+        family_weights=family_weights,
+    )
+    if coupons:
+        repo.save_daily_coupons(win.analysis_day_tr, coupons, is_demo=False)
 
     for b in bundles:
         for out in b.agent_outputs:
@@ -222,6 +247,7 @@ def run_daily_analysis(
         panel_url=settings.panel_base_url,
         used_fallback=bulletin.used_fallback,
         max_matches=settings.daily_max_matches,
+        coupons=coupons,
     )
 
     tg_result = None
@@ -241,6 +267,7 @@ def run_daily_analysis(
         "used_fallback": bulletin.used_fallback,
         "candidates_count": len(candidates),
         "bundles": bundles,
+        "coupons": coupons,
         "report_text": report_text,
         "telegram": tg_result,
     }

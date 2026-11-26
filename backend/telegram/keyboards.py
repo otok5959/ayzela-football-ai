@@ -13,14 +13,17 @@ def main_menu_keyboard() -> dict[str, Any]:
             ],
             [
                 {"text": "🎯 Seçilen 15 Maç", "callback_data": "/bugun"},
+                {"text": "🎟️ Kuponlarım", "callback_data": "/kuponlarim"},
+            ],
+            [
                 {"text": "🔴 Canlı Sonuçlar", "callback_data": "/canli"},
-            ],
-            [
                 {"text": "🏁 Sonuçlar", "callback_data": "/sonuclar"},
-                {"text": "📅 Yarın Fikstürü", "callback_data": "/yarin"},
             ],
             [
+                {"text": "📅 Yarın Fikstürü", "callback_data": "/yarin"},
                 {"text": "🩺 Kaynak Sağlığı", "callback_data": "/kaynaklar"},
+            ],
+            [
                 {"text": "🖥️ Web Panel", "callback_data": "/panel"},
             ],
         ]

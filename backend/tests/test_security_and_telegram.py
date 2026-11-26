@@ -95,3 +95,49 @@ def test_sanitizer_blocks_forbidden_betting_claims():
         assert_safe_report_text("Kupon önerisi ve bahis miktarı: 100 TL")
     safe = assert_safe_report_text("Ev sahibi galibiyet olasılığı %52, veri kapsamı %84.")
     assert "%52" in safe
+
+
+def test_multiuser_telegram_subscribers_broadcast_and_coupons_cmd(temp_repo):
+    temp_repo.upsert_telegram_subscriber("222333444", chat_id="222333444", display_name="iPhone Kullanıcı")
+    router = TelegramCommandRouter(
+        repo=temp_repo,
+        allowed_user_id="111222333",
+        allowed_chat_id="111222333",
+    )
+
+    # Second subscriber from DB must be authorized
+    sub_res = router.handle_update(
+        {"message": {"from": {"id": 222333444}, "chat": {"id": 222333444}, "text": "/kuponlarim"}}
+    )
+    assert sub_res["authorized"] is True
+    assert sub_res["status_code"] == 200
+
+    # Save a sample coupon and check /kuponlarim formatting
+    temp_repo.save_daily_coupons(
+        "2026-11-26",
+        [
+            {
+                "coupon_id": "cpn_test_1",
+                "run_id": "run_1",
+                "coupon_slot": 1,
+                "coupon_type": "balanced",
+                "title_tr": "Dengeli 4'lü Kupon",
+                "total_odd": 5.5,
+                "combined_probability": 0.2,
+                "legs": [
+                    {"iddaa_match_code": "101", "home_team": "A", "away_team": "B", "label_tr": "MS 1", "iddaa_odd": 1.55}
+                ],
+            }
+        ],
+    )
+    cpn_res = router.handle_update(
+        {"message": {"from": {"id": 222333444}, "chat": {"id": 222333444}, "text": "/kuponlarim"}}
+    )
+    assert "Dengeli 4'lü Kupon" in cpn_res["reply_text"]
+    assert "5.50" in cpn_res["reply_text"]
+
+    # Broadcast sends to both admin and subscriber
+    bot = TelegramBotClient(repo=temp_repo, bot_token="", chat_id="111222333")
+    b_res = bot.send_message("Test yayını", dedup_key="broadcast_test_1", notification_type="daily_report")
+    assert b_res["sent"] is True
+    assert len(b_res.get("recipients", [])) == 2

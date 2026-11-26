@@ -19,7 +19,7 @@ from backend.agents.agent_11_math import run_agent_11
 from backend.agents.agent_12_validation import run_agent_12
 from backend.analytics.coverage import compute_data_coverage_score, compute_research_quality_score
 from backend.analytics.market_calculator import compute_all_markets
-from backend.analytics.top_picks import compute_top3_picks
+from backend.analytics.top_picks import compute_top2_picks
 from backend.schemas import (
     FixtureRecord,
     HistoricalMatch,
@@ -38,6 +38,7 @@ def analyze_single_fixture(
     weather: dict | None = None,
     lineup_info: dict | None = None,
     model_version: str = "v1.0.0-ensemble",
+    family_weights: dict[str, float] | None = None,
 ) -> MatchPredictionBundle | None:
     """Run Agents 01..12 and assemble a MatchPredictionBundle (or None if math model has zero data)."""
     a1 = run_agent_01(fixture)
@@ -73,10 +74,12 @@ def analyze_single_fixture(
         if markets["over_under_lines"].available
         else None
     )
-    top_picks = compute_top3_picks(
+    top_picks = compute_top2_picks(
         markets=markets,
         probs_1x2=probs,
         iddaa_odds=fixture.iddaa_odds,
+        used_market_only=bool(ens.get("used_market_only")),
+        family_weights=family_weights,
     )
 
     return MatchPredictionBundle(

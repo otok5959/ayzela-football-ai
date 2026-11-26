@@ -107,7 +107,9 @@ def compute_all_markets(
         ):
             markets[k] = MarketCategoryProbability(available=False, reason="Gol dağılım matrisi için yeterli veri yok")
 
-    # First-half / Second-half splits (empirical 45% / 55% or historical HT ratio when available)
+    # First-half / Second-half splits (empirical 44% / 56% or historical HT ratio when available)
+    mat_ht = None
+    mat_sh = None
     if lambda_home is not None and lambda_away is not None:
         ht_ratio = 0.44
         if history:
@@ -139,6 +141,94 @@ def compute_all_markets(
     else:
         markets["first_half_1x2"] = MarketCategoryProbability(available=False, reason="İlk yarı gol verisi yetersiz")
         markets["second_half_1x2"] = MarketCategoryProbability(available=False, reason="İkinci yarı gol verisi yetersiz")
+
+    # Extended pick probabilities across all live-trackable markets
+    ext_probs: dict[str, float] = {}
+    if probs_1x2:
+        p1 = float(probs_1x2.get("home", 0.0))
+        px = float(probs_1x2.get("draw", 0.0))
+        p2 = float(probs_1x2.get("away", 0.0))
+        ext_probs["ms_1"] = round(p1, 4)
+        ext_probs["ms_x"] = round(px, 4)
+        ext_probs["ms_2"] = round(p2, 4)
+        ext_probs["dc_1x"] = round(min(0.99, p1 + px), 4)
+        ext_probs["dc_x2"] = round(min(0.99, p2 + px), 4)
+        ext_probs["dc_12"] = round(min(0.99, p1 + p2), 4)
+
+    if matrix is not None:
+        max_g = matrix.shape[0] - 1
+        p_kg_v = float(matrix[1:, 1:].sum())
+        ext_probs["kg_var"] = round(p_kg_v, 4)
+        ext_probs["kg_yok"] = round(1.0 - p_kg_v, 4)
+
+        for line in (1.5, 2.5, 3.5, 4.5):
+            lk = str(line).replace(".", "_")
+            ov = float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if i + j > line))
+            ext_probs[f"ust_{lk}"] = round(ov, 4)
+            ext_probs[f"alt_{lk}"] = round(1.0 - ov, 4)
+
+        for line in (0.5, 1.5, 2.5):
+            lk = str(line).replace(".", "_")
+            ev_ov = float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if i > line))
+            dep_ov = float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if j > line))
+            ext_probs[f"ev_ust_{lk}"] = round(ev_ov, 4)
+            ext_probs[f"ev_alt_{lk}"] = round(1.0 - ev_ov, 4)
+            ext_probs[f"dep_ust_{lk}"] = round(dep_ov, 4)
+            ext_probs[f"dep_alt_{lk}"] = round(1.0 - dep_ov, 4)
+
+        for line in (1.5, 2.5, 3.5):
+            lk = str(line).replace(".", "_")
+            ext_probs[f"ms1_ust_{lk}"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if i > j and i + j > line)), 4)
+            ext_probs[f"ms1_alt_{lk}"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if i > j and i + j < line)), 4)
+            ext_probs[f"ms2_ust_{lk}"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if j > i and i + j > line)), 4)
+            ext_probs[f"ms2_alt_{lk}"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if j > i and i + j < line)), 4)
+
+        ext_probs["ust25_kg_var"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if i + j > 2.5 and i > 0 and j > 0)), 4)
+        ext_probs["alt25_kg_yok"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if i + j < 2.5 and not (i > 0 and j > 0))), 4)
+        ext_probs["alt25_kg_var"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if i + j < 2.5 and i > 0 and j > 0)), 4)
+        ext_probs["ust25_kg_yok"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if i + j > 2.5 and not (i > 0 and j > 0))), 4)
+
+        ext_probs["ms1_kg_var"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if i > j and i > 0 and j > 0)), 4)
+        ext_probs["ms1_kg_yok"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if i > j and not (i > 0 and j > 0))), 4)
+        ext_probs["ms2_kg_var"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if j > i and i > 0 and j > 0)), 4)
+        ext_probs["ms2_kg_yok"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if j > i and not (i > 0 and j > 0))), 4)
+
+        ext_probs["hnd_m1_1"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if i - j >= 2)), 4)
+        ext_probs["hnd_p1_2"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if j - i >= 2)), 4)
+
+        ext_probs["gol_0_1"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if i + j <= 1)), 4)
+        ext_probs["gol_2_3"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if 2 <= i + j <= 3)), 4)
+        ext_probs["gol_4_5"] = round(float(sum(matrix[i, j] for i in range(max_g + 1) for j in range(max_g + 1) if 4 <= i + j <= 5)), 4)
+
+    if mat_ht is not None:
+        ht_g = mat_ht.shape[0] - 1
+        iy1 = float(np.tril(mat_ht, k=-1).sum())
+        iyx = float(np.trace(mat_ht))
+        iy2 = float(np.triu(mat_ht, k=1).sum())
+        ext_probs["iy_1"] = round(iy1, 4)
+        ext_probs["iy_x"] = round(iyx, 4)
+        ext_probs["iy_2"] = round(iy2, 4)
+        ext_probs["iy_1x"] = round(min(0.99, iy1 + iyx), 4)
+        ext_probs["iy_x2"] = round(min(0.99, iy2 + iyx), 4)
+        ext_probs["iy_12"] = round(min(0.99, iy1 + iy2), 4)
+        for line in (0.5, 1.5):
+            lk = str(line).replace(".", "_")
+            ov_ht = float(sum(mat_ht[i, j] for i in range(ht_g + 1) for j in range(ht_g + 1) if i + j > line))
+            ext_probs[f"iy_ust_{lk}"] = round(ov_ht, 4)
+            ext_probs[f"iy_alt_{lk}"] = round(1.0 - ov_ht, 4)
+        iy_kg_v = float(mat_ht[1:, 1:].sum())
+        ext_probs["iy_kg_var"] = round(iy_kg_v, 4)
+        ext_probs["iy_kg_yok"] = round(1.0 - iy_kg_v, 4)
+
+    if mat_sh is not None:
+        ext_probs["2y_1"] = round(float(np.tril(mat_sh, k=-1).sum()), 4)
+        ext_probs["2y_x"] = round(float(np.trace(mat_sh)), 4)
+        ext_probs["2y_2"] = round(float(np.triu(mat_sh, k=1).sum()), 4)
+
+    if ext_probs:
+        markets["extended_pick_probs"] = MarketCategoryProbability(available=True, probabilities=ext_probs)
+    else:
+        markets["extended_pick_probs"] = MarketCategoryProbability(available=False, reason="Genişletilmiş olasılıklar için yeterli veri yok")
 
     # Shots, On-Target Shots, Corners, Cards — strictly data-gated (no fabrication!)
     stats = team_stats or {}

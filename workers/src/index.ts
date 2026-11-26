@@ -5,7 +5,7 @@ import {
   verifySessionRequest,
 } from "./auth";
 import { dispatchGithubWorkflow } from "./github_dispatch";
-import { enrichAndSilentPersist, getIstanbulDates } from "./live_scores";
+import { enrichAndSilentPersist, enrichCouponsWithLiveScores, getIstanbulDates } from "./live_scores";
 import { handleTelegramWebhook } from "./telegram_webhook";
 
 function resolveAllowedOrigin(request: Request, env: Env): string {
@@ -343,6 +343,120 @@ export default {
       if (url.pathname === "/api/backtests") {
         const rows = await env.DB.prepare("SELECT * FROM backtest_results ORDER BY created_at_utc DESC LIMIT 20").all();
         return jsonResponse({ backtests: rows.results }, 200, origin);
+      }
+
+      if (url.pathname === "/api/coupons" && request.method === "GET") {
+        try {
+          const rows = await env.DB.prepare(
+            "SELECT * FROM daily_coupons WHERE is_demo = 0 ORDER BY analysis_day_tr DESC, coupon_slot ASC, created_at_utc DESC LIMIT 24"
+          ).all();
+          const enriched = await enrichCouponsWithLiveScores(env, rows.results || []);
+          const latestDay = enriched[0]?.analysis_day_tr || getIstanbulDates().todayTr;
+          const todayCoupons = enriched.filter((c) => c.analysis_day_tr === latestDay).slice(0, 2);
+          const historyCoupons = enriched.filter((c) => c.analysis_day_tr !== latestDay);
+          return jsonResponse(
+            {
+              analysis_day_tr: latestDay,
+              today_coupons: todayCoupons,
+              history_coupons: historyCoupons,
+            },
+            200,
+            origin
+          );
+        } catch {
+          return jsonResponse(
+            { analysis_day_tr: getIstanbulDates().todayTr, today_coupons: [], history_coupons: [] },
+            200,
+            origin
+          );
+        }
+      }
+
+      if (url.pathname === "/api/telegram/subscribers" && request.method === "GET") {
+        let subscribers: any[] = [];
+        try {
+          const subRes = await env.DB.prepare(
+            "SELECT * FROM telegram_subscribers ORDER BY enabled DESC, created_at_utc ASC"
+          ).all();
+          subscribers = subRes.results || [];
+        } catch {
+          subscribers = [];
+        }
+
+        const allowed = new Set<string>(
+          (env.TELEGRAM_ALLOWED_USER_ID || "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        );
+        for (const s of subscribers) {
+          if (s.enabled) allowed.add(String(s.telegram_user_id));
+        }
+
+        const logRes = await env.DB.prepare(
+          "SELECT details_json, created_at_utc FROM system_logs WHERE level = 'SECURITY' AND module = 'worker.telegram' ORDER BY id DESC LIMIT 20"
+        ).all();
+        const pendingMap = new Map<string, any>();
+        for (const l of logRes.results || []) {
+          try {
+            const d = JSON.parse(String((l as any).details_json || "{}"));
+            const uid = String(d.uid || "").trim();
+            if (uid && !allowed.has(uid) && !pendingMap.has(uid)) {
+              pendingMap.set(uid, {
+                telegram_user_id: uid,
+                chat_id: String(d.cid || uid),
+                name: d.name || "",
+                username: d.username || "",
+                seen_at_utc: (l as any).created_at_utc,
+              });
+            }
+          } catch {
+            // Skip
+          }
+        }
+
+        return jsonResponse(
+          {
+            primary_admin_ids: (env.TELEGRAM_ALLOWED_USER_ID || "").split(",").map((s) => s.trim()).filter(Boolean),
+            subscribers,
+            pending_requests: Array.from(pendingMap.values()),
+          },
+          200,
+          origin
+        );
+      }
+
+      if (url.pathname === "/api/telegram/subscribers" && request.method === "POST") {
+        const b = (await request.json()) as {
+          telegram_user_id?: string;
+          chat_id?: string;
+          display_name?: string;
+        };
+        const uid = String(b.telegram_user_id || "").trim();
+        if (!/^\d+$/.test(uid)) {
+          return jsonResponse({ error: "Geçerli sayısal Telegram ID giriniz." }, 400, origin);
+        }
+        const cid = String(b.chat_id || uid).trim();
+        const name = String(b.display_name || `Kullanıcı ${uid}`).trim();
+        await env.DB.prepare(
+          `INSERT INTO telegram_subscribers (telegram_user_id, chat_id, display_name, role, enabled, created_at_utc)
+           VALUES (?, ?, ?, 'member', 1, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+           ON CONFLICT(telegram_user_id) DO UPDATE SET
+             chat_id = excluded.chat_id,
+             display_name = excluded.display_name,
+             enabled = 1`
+        )
+          .bind(uid, cid, name)
+          .run();
+        return jsonResponse({ ok: true, telegram_user_id: uid }, 201, origin);
+      }
+
+      if (url.pathname.startsWith("/api/telegram/subscribers/") && request.method === "DELETE") {
+        const targetId = url.pathname.split("/").pop() || "";
+        await env.DB.prepare("UPDATE telegram_subscribers SET enabled = 0 WHERE telegram_user_id = ?")
+          .bind(targetId)
+          .run();
+        return jsonResponse({ ok: true }, 200, origin);
       }
     }
 
