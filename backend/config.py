@@ -49,7 +49,7 @@ class Settings(BaseSettings):
     cloudflare_api_token: str = Field(default="", alias="CLOUDFLARE_API_TOKEN")
 
     admin_session_secret: str = Field(default="", alias="ADMIN_SESSION_SECRET")
-    panel_base_url: str = Field(default="https://ayzela-panel.pages.dev", alias="PANEL_BASE_URL")
+    panel_base_url: str = Field(default="https://ayzela-football-ai-api.otok5959.workers.dev", alias="PANEL_BASE_URL")
 
     github_repository: str = Field(default="", alias="GITHUB_REPOSITORY")
     github_dispatch_token: str = Field(default="", alias="GITHUB_DISPATCH_TOKEN")

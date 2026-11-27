@@ -120,7 +120,7 @@ def main() -> None:
             f"ADMIN_SESSION_SECRET={session_secret}",
             "ADMIN_USERNAME=ayzela_admin",
             f"ADMIN_PASSWORD_HASH={password_hash}",
-            "PANEL_BASE_URL=https://ayzela-panel.pages.dev",
+            "PANEL_BASE_URL=https://ayzela-football-ai-api.otok5959.workers.dev",
             "GITHUB_REPOSITORY=username/ayzela-football-ai",
             "GITHUB_DISPATCH_TOKEN=",
             "",

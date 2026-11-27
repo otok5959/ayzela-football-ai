@@ -176,7 +176,12 @@ export interface UsageLimitRow {
 }
 
 const DEFAULT_API_BASE = "https://ayzela-football-ai-api.otok5959.workers.dev";
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE).replace(/\/+$/, "");
+const API_BASE = (
+  import.meta.env.VITE_API_BASE_URL ||
+  (typeof window !== "undefined" && window.location.hostname.endsWith(".workers.dev")
+    ? window.location.origin
+    : DEFAULT_API_BASE)
+).replace(/\/+$/, "");
 const TOKEN_STORAGE_KEY = "ayzela_session_token";
 
 function getStoredToken(): string | null {

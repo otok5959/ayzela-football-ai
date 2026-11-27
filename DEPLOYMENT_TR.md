@@ -56,6 +56,8 @@ npx wrangler pages deploy dist --project-name ayzela-panel
 
 Pages ortam değişkeni olarak `VITE_API_BASE_URL=https://ayzela-football-ai-api.<hesabiniz>.workers.dev` tanımlayın.
 
+> **Önemli Not (Mobil / Türkiye ISS Erişimi):** PWA paneli ayrıca `workers/wrangler.toml` içindeki `[assets]` yapılandırmasıyla doğrudan Worker üzerinden (`https://ayzela-football-ai-api.<hesabiniz>.workers.dev`) de sunulmaktadır; böylece `*.pages.dev` engelli ağlarda da aynı alan adı üzerinden giriş yapılabilir.
+
 ## 5. GitHub Actions Gizli Değişkenleri
 
 GitHub deponuzda **Settings → Secrets and variables → Actions** altına şu gizli anahtarları ekleyin:

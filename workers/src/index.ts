@@ -10,9 +10,11 @@ import { handleTelegramWebhook } from "./telegram_webhook";
 
 function resolveAllowedOrigin(request: Request, env: Env): string {
   const reqOrigin = request.headers.get("Origin") || "";
-  const primary = env.PANEL_ORIGIN || "https://ayzela-panel.pages.dev";
+  const primary = env.PANEL_ORIGIN || "https://ayzela-football-ai-api.otok5959.workers.dev";
   if (
     reqOrigin === primary ||
+    reqOrigin === "https://ayzela-football-ai-api.otok5959.workers.dev" ||
+    reqOrigin === "https://ayzela-panel.pages.dev" ||
     /^https:\/\/[a-z0-9-]+\.ayzela-panel\.pages\.dev$/.test(reqOrigin) ||
     reqOrigin === "http://localhost:5173"
   ) {
@@ -458,6 +460,15 @@ export default {
           .run();
         return jsonResponse({ ok: true }, 200, origin);
       }
+    }
+
+    if (
+      env.ASSETS &&
+      (request.method === "GET" || request.method === "HEAD") &&
+      !url.pathname.startsWith("/api/") &&
+      !url.pathname.startsWith("/webhook/")
+    ) {
+      return env.ASSETS.fetch(new Request(new URL("/index.html", request.url), request));
     }
 
     return jsonResponse({ error: "Uç nokta bulunamadı." }, 404, origin);

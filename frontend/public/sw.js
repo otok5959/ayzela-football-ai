@@ -1,4 +1,4 @@
-const CACHE_NAME = "ayzela-shell-v5";
+const CACHE_NAME = "ayzela-shell-v6";
 const SHELL_ASSETS = ["/manifest.webmanifest", "/icon.svg", "/apple-touch-icon.png", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {
@@ -16,7 +16,15 @@ self.addEventListener("activate", (event) => {
 });
 
 self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET" || event.request.url.includes("/api/")) return;
+  const reqUrl = new URL(event.request.url);
+  if (
+    event.request.method !== "GET" ||
+    reqUrl.pathname.startsWith("/api/") ||
+    reqUrl.pathname === "/health" ||
+    reqUrl.pathname.startsWith("/webhook/")
+  ) {
+    return;
+  }
 
   // Network-first for HTML, JS, CSS so updates always appear immediately
   event.respondWith(
