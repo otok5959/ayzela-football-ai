@@ -123,7 +123,8 @@ class OpenFootballJsonProvider(BaseProvider):
             lg = self.league_filter.by_org_id.get(org_id)
             if not lg or not lg.get("enabled", True):
                 continue
-            url = f"{BASE_RAW}/{season}/{filename}"
+            target_season = CALENDAR_YEAR_SEASONS[0] if org_id == "bra_serie_a" else season
+            url = f"{BASE_RAW}/{target_season}/{filename}"
             try:
                 data, _, _, fetched_at = self.http.get_json(url, ttl_seconds=900, check_robots=False)
             except Exception:

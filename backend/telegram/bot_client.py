@@ -87,6 +87,9 @@ class TelegramBotClient:
                     if reply_markup and idx == len(parts) - 1:
                         payload["reply_markup"] = reply_markup
                     resp = client.post(url, json=payload)
+                    if resp.status_code == 400:
+                        plain_payload = {k: v for k, v in payload.items() if k != "parse_mode"}
+                        resp = client.post(url, json=plain_payload)
                     resp.raise_for_status()
                     res_json = resp.json()
                     last_msg_id = str(((res_json.get("result") or {}).get("message_id")) or "")

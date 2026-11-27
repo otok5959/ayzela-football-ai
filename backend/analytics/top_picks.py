@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from typing import Any
 
 from backend.schemas import MarketCategoryProbability, MatchPredictionBundle
@@ -425,8 +426,8 @@ def _is_second_half_or_ht(live_minute: str | None) -> bool:
     m = live_minute.strip().upper()
     if m in ("İY", "DEVRE ARASI", "MS"):
         return True
-    digits = "".join(ch for ch in m if ch.isdigit())
-    return bool(digits and int(digits) >= 46)
+    match = re.match(r"^(\d+)", m)
+    return bool(match and int(match.group(1)) >= 46)
 
 
 def evaluate_pick_outcome(

@@ -12,6 +12,10 @@ body {
   color: #f1f5f9;
 }
 
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

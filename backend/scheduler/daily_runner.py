@@ -27,13 +27,14 @@ def run_daily_analysis(
     run_type: str = "morning_0800",
     now_tr: datetime | None = None,
     bot: TelegramBotClient | None = None,
-    send_telegram: bool = True,
+    send_telegram: bool | None = None,
 ) -> dict[str, Any]:
     """
     Execute an independent daily analysis pass (08:00 or 11:59 TRT).
     11:59 never copies 08:00 results; it re-queries sources and re-computes models from scratch.
     """
     settings = get_settings()
+    effective_send_telegram = settings.telegram_enabled if send_telegram is None else send_telegram
     guard = UsageLimitGuard(repo)
     bot_client = bot or TelegramBotClient(repo)
     win = get_analysis_window(run_type, now_tr=now_tr)
@@ -53,15 +54,18 @@ def run_daily_analysis(
             delay_seconds=delay_seconds,
             bulletin_source="none",
         )
+        completed_tr = datetime.now(ISTANBUL_TZ).isoformat()
         repo.complete_analysis_run(
             run_id=run_id,
             status="skipped_limit",
-            completed_at_tr=datetime.now(ISTANBUL_TZ).isoformat(),
+            completed_at_tr=completed_tr,
             matches_analyzed=0,
             avg_data_coverage=0.0,
             notes_tr=limit_res.message_tr,
         )
-        if send_telegram:
+        if run_type in ("morning_0800", "midday_1159"):
+            repo.update_scheduled_job_status(run_type, "skipped_limit", completed_tr)
+        if effective_send_telegram:
             bot_client.send_message(
                 limit_res.message_tr,
                 dedup_key=f"limit_stop_{win.analysis_day_tr}_{run_type}",
@@ -69,7 +73,7 @@ def run_daily_analysis(
             )
         return {"run_id": run_id, "status": "skipped_limit", "bundles": []}
 
-    if limit_res.warning and send_telegram:
+    if limit_res.warning and effective_send_telegram:
         bot_client.send_message(
             limit_res.message_tr,
             dedup_key=f"limit_warn_{win.analysis_day_tr}_{limit_res.resource_key}",
@@ -93,7 +97,7 @@ def run_daily_analysis(
         bulletin_source=bulletin.primary_source,
     )
 
-    if bulletin.used_fallback and send_telegram:
+    if bulletin.used_fallback and effective_send_telegram:
         fb_msg = (
             f"⚠️ *Kaynak Değişikliği Bildirimi*\n"
             f"Ana kaynak İddaa.com erişilemediği için izinli yedek kaynaklara geçildi: "
@@ -220,14 +224,17 @@ def run_daily_analysis(
 
     avg_cov = round(sum(b.data_coverage_score for b in bundles) / len(bundles), 4) if bundles else 0.0
     top15_count = sum(1 for b in bundles if b.is_selected_top15)
+    completed_tr = datetime.now(ISTANBUL_TZ).isoformat()
     repo.complete_analysis_run(
         run_id=run_id,
         status="completed",
-        completed_at_tr=datetime.now(ISTANBUL_TZ).isoformat(),
+        completed_at_tr=completed_tr,
         matches_analyzed=len(bundles),
         avg_data_coverage=avg_cov,
         notes_tr=f"{len(candidates)} aday içinden {len(bundles)} maç analiz edildi, ilk {top15_count} seçildi (gecikme={delay_seconds}s).",
     )
+    if run_type in ("morning_0800", "midday_1159"):
+        repo.update_scheduled_job_status(run_type, "completed", completed_tr)
 
     if run_type == "morning_0800":
         label = "Sabah Analizi (08:00 TRT)"
@@ -251,7 +258,7 @@ def run_daily_analysis(
     )
 
     tg_result = None
-    if send_telegram:
+    if effective_send_telegram:
         tg_result = bot_client.send_message(
             text=report_text,
             dedup_key=dedup_key,

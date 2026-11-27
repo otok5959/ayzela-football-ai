@@ -1,4 +1,4 @@
-const CACHE_NAME = "ayzela-shell-v6";
+const CACHE_NAME = "ayzela-shell-v7";
 const SHELL_ASSETS = ["/manifest.webmanifest", "/icon.svg", "/apple-touch-icon.png", "/icon-192.png", "/icon-512.png"];
 
 self.addEventListener("install", (event) => {

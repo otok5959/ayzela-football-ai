@@ -40,6 +40,16 @@ function jsonResponse(data: unknown, status = 200, origin = "*", extraHeaders: R
   });
 }
 
+async function parseJsonBody<T>(request: Request): Promise<{ ok: true; data: T } | { ok: false }> {
+  try {
+    const data = (await request.json()) as T;
+    if (!data || typeof data !== "object") return { ok: false };
+    return { ok: true, data };
+  } catch {
+    return { ok: false };
+  }
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -59,16 +69,35 @@ export default {
     }
 
     if (url.pathname === "/health") {
-      return jsonResponse({ ok: true, service: "ayzela-football-ai-api", tz: env.TZ }, 200, origin);
+      return jsonResponse(
+        {
+          ok: true,
+          service: "ayzela-football-ai-api",
+          tz: env.TZ,
+          telegram_enabled: env.TELEGRAM_ENABLED === "true",
+        },
+        200,
+        origin
+      );
     }
 
     if (url.pathname === "/webhook/telegram" && request.method === "POST") {
+      if (env.TELEGRAM_ENABLED !== "true") {
+        return jsonResponse({ ok: false, disabled: true, message: "Telegram devre dışı (PWA modu)." }, 410, origin);
+      }
       return handleTelegramWebhook(request, env);
     }
 
     // Auth endpoints
     if (url.pathname === "/api/auth/login" && request.method === "POST") {
-      const body = (await request.json()) as { username?: string; password?: string };
+      if (!env.ADMIN_SESSION_SECRET) {
+        return jsonResponse({ error: "Sunucu yapılandırması eksik (ADMIN_SESSION_SECRET)." }, 500, origin);
+      }
+      const parsed = await parseJsonBody<{ username?: string; password?: string }>(request);
+      if (!parsed.ok) {
+        return jsonResponse({ error: "Geçersiz JSON gövdesi." }, 400, origin);
+      }
+      const body = parsed.data;
       const validUser = body.username === (env.ADMIN_USERNAME || "ayzela_admin");
       const validPass = await verifyPbkdf2Password(body.password || "", env.ADMIN_PASSWORD_HASH || "");
       if (!validUser || !validPass) {
@@ -102,12 +131,14 @@ export default {
       }
 
       if (url.pathname === "/api/dashboard") {
-        const [runs, preds, sources, limits, metrics] = await Promise.all([
-          env.DB.prepare("SELECT * FROM analysis_runs ORDER BY actual_started_at_tr DESC LIMIT 5").all(),
+        const [runs, preds, sources, limits, metrics, backtests, schedJobs] = await Promise.all([
+          env.DB.prepare("SELECT * FROM analysis_runs ORDER BY actual_started_at_tr DESC LIMIT 6").all(),
           env.DB.prepare("SELECT COUNT(*) as cnt, AVG(data_coverage_score) as avg_cov FROM match_predictions WHERE is_demo = 0").first(),
           env.DB.prepare("SELECT status, COUNT(*) as cnt FROM source_health GROUP BY status").all(),
           env.DB.prepare("SELECT * FROM usage_limits ORDER BY resource_key").all(),
-          env.DB.prepare("SELECT * FROM model_metrics WHERE is_demo = 0 ORDER BY computed_at_utc DESC LIMIT 6").all(),
+          env.DB.prepare("SELECT * FROM model_metrics WHERE is_demo = 0 ORDER BY computed_at_utc DESC LIMIT 8").all(),
+          env.DB.prepare("SELECT * FROM backtest_results ORDER BY created_at_utc DESC LIMIT 12").all().catch(() => ({ results: [] })),
+          env.DB.prepare("SELECT * FROM scheduled_jobs ORDER BY job_key").all().catch(() => ({ results: [] })),
         ]);
         return jsonResponse(
           {
@@ -116,14 +147,17 @@ export default {
             source_summary: sources.results,
             usage_limits: limits.results,
             metrics: metrics.results,
+            backtests: backtests.results || [],
+            scheduled_jobs: schedJobs.results || [],
             free_only_mode: env.FREE_ONLY_MODE === "true",
+            telegram_enabled: env.TELEGRAM_ENABLED === "true",
           },
           200,
           origin
         );
       }
 
-      if (url.pathname === "/api/fixtures") {
+      if (url.pathname === "/api/fixtures" && request.method === "GET") {
         const rows = await env.DB.prepare(
           `SELECT f.*, mp.prediction_id, mp.prob_home, mp.prob_draw, mp.prob_away,
                   mp.prob_btts_yes, mp.prob_over_25, mp.data_coverage_score, mp.research_quality_score,
@@ -143,6 +177,124 @@ export default {
         ).all();
         const enriched = await enrichAndSilentPersist(env, rows.results || []);
         return jsonResponse({ fixtures: enriched }, 200, origin);
+      }
+
+      if (url.pathname.startsWith("/api/fixtures/") && request.method === "GET") {
+        const fixtureId = decodeURIComponent(url.pathname.slice("/api/fixtures/".length)).trim();
+        if (!fixtureId) {
+          return jsonResponse({ error: "Karşılaşma kimliği geçersiz." }, 400, origin);
+        }
+        const fxRow = await env.DB.prepare(
+          `SELECT f.*, mp.prediction_id, mp.model_version, mp.prob_home, mp.prob_draw, mp.prob_away,
+                  mp.prob_btts_yes, mp.prob_over_25, mp.markets_json, mp.data_coverage_score, mp.research_quality_score,
+                  mp.top_picks_json, mp.is_selected_top15, mp.selection_rank, mp.selection_score,
+                  mr.home_goals AS fin_home_goals, mr.away_goals AS fin_away_goals,
+                  mr.ht_home_goals AS fin_ht_home_goals, mr.ht_away_goals AS fin_ht_away_goals,
+                  mr.outcome_1x2
+           FROM fixtures f
+           LEFT JOIN match_predictions mp
+             ON f.fixture_id = mp.fixture_id
+            AND mp.created_at_utc = (
+              SELECT MAX(mp2.created_at_utc) FROM match_predictions mp2 WHERE mp2.fixture_id = f.fixture_id
+            )
+           LEFT JOIN match_results mr ON f.fixture_id = mr.fixture_id
+           WHERE f.fixture_id = ?
+           LIMIT 1`
+        )
+          .bind(fixtureId)
+          .first<any>();
+
+        if (!fxRow) {
+          return jsonResponse({ error: "Karşılaşma bulunamadı." }, 404, origin);
+        }
+
+        const [enrichedList, recordsRes, lineupsRes, revsRes] = await Promise.all([
+          enrichAndSilentPersist(env, [fxRow]),
+          env.DB.prepare(
+            `SELECT rr.*
+             FROM research_records rr
+             WHERE rr.fixture_id = ?
+               AND rr.id IN (
+                 SELECT MAX(rr2.id) FROM research_records rr2 WHERE rr2.fixture_id = ? GROUP BY rr2.agent_id
+               )
+             ORDER BY rr.agent_id ASC`
+          )
+            .bind(fixtureId, fixtureId)
+            .all(),
+          env.DB.prepare(
+            "SELECT * FROM lineups WHERE fixture_id = ? ORDER BY fetched_at DESC LIMIT 6"
+          )
+            .bind(fixtureId)
+            .all(),
+          env.DB.prepare(
+            "SELECT * FROM prediction_revisions WHERE fixture_id = ? ORDER BY revision_id DESC LIMIT 10"
+          )
+            .bind(fixtureId)
+            .all(),
+        ]);
+
+        let markets: Record<string, any> = {};
+        try {
+          markets = fxRow.markets_json ? JSON.parse(String(fxRow.markets_json)) : {};
+        } catch {
+          markets = {};
+        }
+
+        const enrichedFx = enrichedList[0] || fxRow;
+        delete enrichedFx.markets_json;
+
+        const researchRecords = (recordsRes.results || []).map((r: any) => {
+          let payload: any = {};
+          try {
+            payload = r.payload_json ? JSON.parse(String(r.payload_json)) : {};
+          } catch {
+            payload = {};
+          }
+          return {
+            agent_id: r.agent_id,
+            agent_name: r.agent_name,
+            status: r.status,
+            data_coverage: r.data_coverage,
+            summary_tr: payload.summary_tr || "",
+            metrics: payload.metrics || {},
+            warnings: payload.warnings || [],
+            source_name: r.source_name,
+            source_url: r.source_url,
+            fetched_at: r.fetched_at,
+            verification_status: r.verification_status,
+          };
+        });
+
+        const lineups = (lineupsRes.results || []).map((l: any) => {
+          let starters: string[] = [];
+          try {
+            starters = l.starters_json ? JSON.parse(String(l.starters_json)) : [];
+          } catch {
+            starters = [];
+          }
+          return {
+            id: l.id,
+            team_side: l.team_side,
+            lineup_type: l.lineup_type,
+            formation: l.formation,
+            starters,
+            diff_summary_tr: l.diff_summary_tr,
+            source_name: l.source_name,
+            fetched_at: l.fetched_at,
+          };
+        });
+
+        return jsonResponse(
+          {
+            fixture: enrichedFx,
+            markets,
+            research_records: researchRecords,
+            lineups,
+            revisions: revsRes.results || [],
+          },
+          200,
+          origin
+        );
       }
 
       if (url.pathname === "/api/selected-top15") {
@@ -276,7 +428,7 @@ export default {
           .bind(jobId)
           .run();
         const disp = await dispatchGithubWorkflow(env, "manual_dispatch.yml", { job_id: jobId, task: "source_health_check" });
-        return jsonResponse({ ok: true, job_id: jobId, dispatch: disp }, 200, origin);
+        return jsonResponse({ ok: disp.ok, job_id: jobId, dispatch: disp }, disp.ok ? 200 : 502, origin);
       }
 
       if (url.pathname === "/api/leagues" && request.method === "GET") {
@@ -285,26 +437,33 @@ export default {
       }
 
       if (url.pathname === "/api/leagues" && request.method === "POST") {
-        const b = (await request.json()) as {
+        const parsed = await parseJsonBody<{
           organization_id: string;
           name_tr: string;
           country: string;
           country_code: string;
           category?: string;
-        };
+        }>(request);
+        if (!parsed.ok || !parsed.data.organization_id || !parsed.data.name_tr) {
+          return jsonResponse({ error: "Geçersiz lig bilgisi." }, 400, origin);
+        }
+        const b = parsed.data;
         await env.DB.prepare(
           "INSERT INTO leagues (organization_id, name_tr, country, country_code, tier, category, enabled) VALUES (?, ?, ?, ?, 1, ?, 1)"
         )
-          .bind(b.organization_id, b.name_tr, b.country, b.country_code, b.category || "domestic_league")
+          .bind(b.organization_id, b.name_tr, b.country || "Diğer", b.country_code || "INT", b.category || "domestic_league")
           .run();
         return jsonResponse({ ok: true }, 201, origin);
       }
 
       if (url.pathname.startsWith("/api/leagues/") && request.method === "PATCH") {
         const orgId = url.pathname.split("/").pop()!;
-        const b = (await request.json()) as { enabled: boolean };
+        const parsed = await parseJsonBody<{ enabled: boolean }>(request);
+        if (!parsed.ok) {
+          return jsonResponse({ error: "Geçersiz JSON gövdesi." }, 400, origin);
+        }
         await env.DB.prepare("UPDATE leagues SET enabled = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE organization_id = ?")
-          .bind(b.enabled ? 1 : 0, orgId)
+          .bind(parsed.data.enabled ? 1 : 0, orgId)
           .run();
         return jsonResponse({ ok: true }, 200, origin);
       }
@@ -321,20 +480,31 @@ export default {
       }
 
       if (url.pathname === "/api/jobs" && request.method === "GET") {
-        const rows = await env.DB.prepare("SELECT * FROM job_queue ORDER BY created_at_utc DESC LIMIT 15").all();
-        return jsonResponse({ jobs: rows.results }, 200, origin);
+        const [queueRows, schedRows] = await Promise.all([
+          env.DB.prepare("SELECT * FROM job_queue ORDER BY created_at_utc DESC LIMIT 20").all(),
+          env.DB.prepare("SELECT * FROM scheduled_jobs ORDER BY job_key").all().catch(() => ({ results: [] })),
+        ]);
+        return jsonResponse(
+          { jobs: queueRows.results || [], scheduled_jobs: schedRows.results || [] },
+          200,
+          origin
+        );
       }
 
       if (url.pathname === "/api/jobs/dispatch" && request.method === "POST") {
-        const b = (await request.json()) as { task: string; query?: string };
+        const parsed = await parseJsonBody<{ task?: string; query?: string }>(request);
+        if (!parsed.ok) {
+          return jsonResponse({ error: "Geçersiz JSON gövdesi." }, 400, origin);
+        }
+        const b = parsed.data;
         const jobId = `job_${crypto.randomUUID().slice(0, 10)}`;
         await env.DB.prepare(
           "INSERT INTO job_queue (job_id, job_type, payload_json, status, created_at_utc) VALUES (?, 'manual_analysis', ?, 'queued', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))"
         )
           .bind(jobId, JSON.stringify({ query: b.query || "" }))
           .run();
-        const disp = await dispatchGithubWorkflow(env, "manual_dispatch.yml", { job_id: jobId, task: b.task });
-        return jsonResponse({ ok: true, job_id: jobId, dispatch: disp }, 200, origin);
+        const disp = await dispatchGithubWorkflow(env, "manual_dispatch.yml", { job_id: jobId, task: b.task || "manual_analysis" });
+        return jsonResponse({ ok: disp.ok, job_id: jobId, dispatch: disp }, disp.ok ? 200 : 502, origin);
       }
 
       if (url.pathname === "/api/logs") {
@@ -429,11 +599,15 @@ export default {
       }
 
       if (url.pathname === "/api/telegram/subscribers" && request.method === "POST") {
-        const b = (await request.json()) as {
+        const parsed = await parseJsonBody<{
           telegram_user_id?: string;
           chat_id?: string;
           display_name?: string;
-        };
+        }>(request);
+        if (!parsed.ok) {
+          return jsonResponse({ error: "Geçersiz JSON gövdesi." }, 400, origin);
+        }
+        const b = parsed.data;
         const uid = String(b.telegram_user_id || "").trim();
         if (!/^\d+$/.test(uid)) {
           return jsonResponse({ error: "Geçerli sayısal Telegram ID giriniz." }, 400, origin);

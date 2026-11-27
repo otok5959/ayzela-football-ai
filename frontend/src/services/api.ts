@@ -75,29 +75,6 @@ export interface CouponsResponse {
   history_coupons: CouponRow[];
 }
 
-export interface TelegramSubscriberRow {
-  telegram_user_id: string;
-  chat_id: string;
-  display_name: string;
-  role: string;
-  enabled: number;
-  created_at_utc: string;
-}
-
-export interface PendingTelegramRequest {
-  telegram_user_id: string;
-  chat_id: string;
-  name: string;
-  username: string;
-  seen_at_utc: string;
-}
-
-export interface TelegramSubscribersResponse {
-  primary_admin_ids: string[];
-  subscribers: TelegramSubscriberRow[];
-  pending_requests: PendingTelegramRequest[];
-}
-
 export interface FixtureRow {
   fixture_id: string;
   iddaa_match_code?: string | null;
@@ -117,6 +94,7 @@ export interface FixtureRow {
   live_status_label?: string | null;
   bulletin_source: string;
   iddaa_verified: number;
+  model_version?: string;
   prob_home?: number;
   prob_draw?: number;
   prob_away?: number;
@@ -173,6 +151,131 @@ export interface UsageLimitRow {
   unit: string;
   warn_threshold_pct: number;
   hard_stop_threshold_pct: number;
+  reset_at_utc?: string;
+}
+
+export interface AnalysisRunRow {
+  run_id: string;
+  run_type: string;
+  analysis_day_tr: string;
+  scheduled_at_tr: string;
+  actual_started_at_tr: string;
+  completed_at_tr?: string | null;
+  delay_seconds: number;
+  status: string;
+  bulletin_source: string;
+  matches_analyzed: number;
+  avg_data_coverage: number;
+  notes_tr?: string | null;
+}
+
+export interface ModelMetricRow {
+  id?: number;
+  period_type: string;
+  period_key: string;
+  model_version: string;
+  evaluated_matches: number;
+  accuracy: number;
+  brier_score: number;
+  log_loss: number;
+  calibration_json?: string;
+  confusion_matrix_json?: string;
+  coverage_breakdown_json?: string;
+  computed_at_utc: string;
+}
+
+export interface BacktestRow {
+  backtest_id: string;
+  model_name: string;
+  model_version: string;
+  dataset_source: string;
+  train_start_date: string;
+  train_end_date: string;
+  test_start_date: string;
+  test_end_date: string;
+  total_folds: number;
+  evaluated_matches: number;
+  accuracy: number;
+  brier_score: number;
+  log_loss: number;
+  calibration_json?: string;
+  promoted: number;
+  notes_tr?: string | null;
+  created_at_utc: string;
+}
+
+export interface JobQueueRow {
+  job_id: string;
+  job_type: string;
+  payload_json: string;
+  status: string;
+  result_summary_tr?: string | null;
+  created_at_utc: string;
+  started_at_utc?: string | null;
+  completed_at_utc?: string | null;
+}
+
+export interface ScheduledJobRow {
+  job_key: string;
+  name_tr: string;
+  cron_utc: string;
+  schedule_tr: string;
+  enabled: number;
+  last_run_at_tr?: string | null;
+  last_status?: string | null;
+}
+
+export interface ResearchRecordRow {
+  agent_id: string;
+  agent_name: string;
+  status: string;
+  data_coverage: number;
+  summary_tr: string;
+  metrics: Record<string, any>;
+  warnings: string[];
+  source_name: string;
+  source_url: string;
+  fetched_at: string;
+  verification_status: string;
+}
+
+export interface LineupRow {
+  id: number;
+  team_side: "home" | "away" | string;
+  lineup_type: "probable" | "confirmed" | string;
+  formation?: string | null;
+  starters: string[];
+  diff_summary_tr?: string | null;
+  source_name: string;
+  fetched_at: string;
+}
+
+export interface FixtureDetailResponse {
+  fixture: FixtureRow;
+  markets: Record<string, { available: boolean; probabilities?: Record<string, number>; reason?: string; extra?: Record<string, any> }>;
+  research_records: ResearchRecordRow[];
+  lineups: LineupRow[];
+  revisions: Array<{
+    revision_id: number;
+    reason: string;
+    prob_home: number;
+    prob_draw: number;
+    prob_away: number;
+    data_coverage_score: number;
+    created_at_utc: string;
+  }>;
+}
+
+export interface DashboardResponse {
+  latest_runs: AnalysisRunRow[];
+  predictions_summary?: { cnt?: number; avg_cov?: number | null } | null;
+  source_summary: Array<{ status: string; cnt: number }>;
+  usage_limits: UsageLimitRow[];
+  metrics: ModelMetricRow[];
+  backtests?: BacktestRow[];
+  scheduled_jobs?: ScheduledJobRow[];
+  free_only_mode: boolean;
+  telegram_enabled?: boolean;
 }
 
 const DEFAULT_API_BASE = "https://ayzela-football-ai-api.otok5959.workers.dev";
@@ -237,10 +340,12 @@ export const api = {
   },
   logout: async () => {
     clearStoredToken();
-    return requestJson<{ ok: boolean }>("/api/auth/logout", { method: "POST" });
+    return requestJson<{ ok: boolean }>("/api/auth/logout", { method: "POST" }).catch(() => ({ ok: true }));
   },
-  dashboard: () => requestJson<any>("/api/dashboard"),
+  dashboard: () => requestJson<DashboardResponse>("/api/dashboard"),
   fixtures: () => requestJson<{ fixtures: FixtureRow[] }>("/api/fixtures"),
+  fixtureDetail: (fixtureId: string) =>
+    requestJson<FixtureDetailResponse>(`/api/fixtures/${encodeURIComponent(fixtureId)}`),
   selectedTop15: () => requestJson<Top15Response>("/api/selected-top15"),
   coupons: () => requestJson<CouponsResponse>("/api/coupons"),
   live: () => requestJson<LiveResponse>("/api/live"),
@@ -263,19 +368,9 @@ export const api = {
     requestJson<{ ok: boolean; job_id: string; dispatch?: { detail?: string } }>("/api/analysis/run-now", {
       method: "POST",
     }),
-  jobs: () => requestJson<{ jobs: any[] }>("/api/jobs"),
+  jobs: () => requestJson<{ jobs: JobQueueRow[]; scheduled_jobs?: ScheduledJobRow[] }>("/api/jobs"),
   logs: () => requestJson<{ logs: any[] }>("/api/logs"),
-  backtests: () => requestJson<{ backtests: any[] }>("/api/backtests"),
-  telegramSubscribers: () => requestJson<TelegramSubscribersResponse>("/api/telegram/subscribers"),
-  addTelegramSubscriber: (payload: { telegram_user_id: string; chat_id?: string; display_name?: string }) =>
-    requestJson<{ ok: boolean; telegram_user_id: string }>("/api/telegram/subscribers", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-  removeTelegramSubscriber: (telegramUserId: string) =>
-    requestJson<{ ok: boolean }>(`/api/telegram/subscribers/${encodeURIComponent(telegramUserId)}`, {
-      method: "DELETE",
-    }),
+  backtests: () => requestJson<{ backtests: BacktestRow[] }>("/api/backtests"),
 };
 
 export const ISOLATED_DEMO_PREVIEW = {

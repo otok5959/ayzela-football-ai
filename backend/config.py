@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     app_env: str = Field(default="development", alias="APP_ENV")
     tz: str = Field(default="Europe/Istanbul", alias="TZ")
     free_only_mode: bool = Field(default=True, alias="FREE_ONLY_MODE")
+    telegram_enabled: bool = Field(default=False, alias="TELEGRAM_ENABLED")
     all_iddaa_bulletin: bool = Field(default=True, alias="ALL_IDDAA_BULLETIN")
     daily_max_matches: int = Field(default=250, alias="DAILY_MAX_MATCHES")
     lineup_check_interval_minutes: int = Field(default=30, alias="LINEUP_CHECK_INTERVAL_MINUTES")

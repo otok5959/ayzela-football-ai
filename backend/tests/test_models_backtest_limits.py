@@ -141,3 +141,32 @@ def test_free_only_mode_and_usage_limit_guard_and_market_implied(temp_repo):
     chk = guard.check_and_consume("github_actions_minutes_monthly", units=10, heavy_task=True)
     assert chk.allowed is False
     assert chk.warning is True
+
+
+def test_sqlite_init_schema_is_idempotent(tmp_path):
+    from pathlib import Path
+    from backend.database.sqlite_backend import SQLiteClient
+
+    migrations_dir = Path(__file__).resolve().parents[2] / "migrations"
+    db = SQLiteClient(tmp_path / "idem.db")
+    db.init_schema(migrations_dir)
+    # Second run must succeed cleanly without duplicate column / table errors
+    db.init_schema(migrations_dir)
+    applied = db.execute("SELECT filename FROM schema_migrations ORDER BY filename")
+    assert len(applied) >= 6
+
+
+def test_usage_limit_auto_resets_when_past_reset_at(temp_repo):
+    temp_repo.increment_usage("github_actions_minutes_monthly", 1950)
+    temp_repo.db.execute(
+        "UPDATE usage_limits SET reset_at_utc = '2020-01-01T00:00:00Z' WHERE resource_key = 'github_actions_minutes_monthly'"
+    )
+    guard = UsageLimitGuard(temp_repo)
+    chk = guard.check_and_consume("github_actions_minutes_monthly", units=2, heavy_task=True)
+    assert chk.allowed is True
+    assert chk.used == 2
+    row = temp_repo.db.execute(
+        "SELECT used_amount, reset_at_utc FROM usage_limits WHERE resource_key = 'github_actions_minutes_monthly'"
+    )[0]
+    assert row["used_amount"] == 2
+    assert row["reset_at_utc"] > "2020-01-01T00:00:00Z"

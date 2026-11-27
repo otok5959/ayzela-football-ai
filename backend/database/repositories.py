@@ -399,6 +399,8 @@ class AyzelaRepository:
             ON CONFLICT(fixture_id) DO UPDATE SET
                 home_goals = excluded.home_goals,
                 away_goals = excluded.away_goals,
+                ht_home_goals = COALESCE(excluded.ht_home_goals, match_results.ht_home_goals),
+                ht_away_goals = COALESCE(excluded.ht_away_goals, match_results.ht_away_goals),
                 outcome_1x2 = excluded.outcome_1x2,
                 btts = excluded.btts,
                 total_goals = excluded.total_goals,
@@ -468,7 +470,7 @@ class AyzelaRepository:
     # --- Telegram Notifications (Idempotency / Dedup) ---
     def was_notification_sent(self, dedup_key: str) -> bool:
         rows = self.db.execute(
-            "SELECT id FROM telegram_notifications WHERE dedup_key = ?",
+            "SELECT id FROM telegram_notifications WHERE dedup_key = ? AND sent_status IN ('sent', 'dry_run')",
             (dedup_key,),
         )
         return len(rows) > 0
@@ -490,6 +492,13 @@ class AyzelaRepository:
                 dedup_key, chat_id, notification_type, message_text,
                 sent_status, telegram_message_id, created_at_utc
             ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(dedup_key) DO UPDATE SET
+                chat_id = excluded.chat_id,
+                notification_type = excluded.notification_type,
+                message_text = excluded.message_text,
+                sent_status = excluded.sent_status,
+                telegram_message_id = excluded.telegram_message_id,
+                created_at_utc = excluded.created_at_utc
             """,
             (
                 dedup_key,
@@ -502,6 +511,15 @@ class AyzelaRepository:
             ),
         )
         return True
+
+    def update_scheduled_job_status(self, job_key: str, status: str, run_at_tr: str) -> None:
+        try:
+            self.db.execute(
+                "UPDATE scheduled_jobs SET last_run_at_tr = ?, last_status = ? WHERE job_key = ?",
+                (run_at_tr, status, job_key),
+            )
+        except Exception:
+            pass
 
     # --- Job Queue ---
     def enqueue_job(

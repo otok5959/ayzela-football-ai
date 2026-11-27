@@ -1,4 +1,4 @@
-import { Env } from "./auth";
+import { Env, timingSafeEqual } from "./auth";
 import { dispatchGithubWorkflow } from "./github_dispatch";
 import { enrichAndSilentPersist, enrichCouponsWithLiveScores, getIstanbulDates, TopPickItem } from "./live_scores";
 
@@ -74,7 +74,8 @@ async function answerCallback(env: Env, callbackQueryId?: string): Promise<void>
 
 async function sendTelegramReply(env: Env, chatId: string, text: string, withMenu = true): Promise<void> {
   if (!env.TELEGRAM_BOT_TOKEN) return;
-  await fetch(`https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+  const url = `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/sendMessage`;
+  const resp = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -85,11 +86,23 @@ async function sendTelegramReply(env: Env, chatId: string, text: string, withMen
       reply_markup: withMenu ? mainKeyboard() : undefined,
     }),
   });
+  if (!resp.ok && resp.status === 400) {
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        disable_web_page_preview: true,
+        reply_markup: withMenu ? mainKeyboard() : undefined,
+      }),
+    });
+  }
 }
 
 export async function handleTelegramWebhook(request: Request, env: Env): Promise<Response> {
   const secretHeader = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
-  if (!env.TELEGRAM_WEBHOOK_SECRET || secretHeader !== env.TELEGRAM_WEBHOOK_SECRET) {
+  if (!env.TELEGRAM_WEBHOOK_SECRET || !timingSafeEqual(secretHeader, env.TELEGRAM_WEBHOOK_SECRET)) {
     return new Response("Forbidden", { status: 403 });
   }
 
@@ -222,7 +235,7 @@ export async function handleTelegramWebhook(request: Request, env: Env): Promise
               : c.effective_status === "lost"
               ? "❌ Tutmadı"
               : c.effective_status === "live"
-              ? `🟡 ${c.won_legs + c.live_won_legs}/4`
+              ? `🟡 ${c.won_legs + c.live_won_legs}/${c.legs?.length || 4}`
               : "⏳ Bekliyor";
           outLines.push(`\n${icon} *${c.title_tr}* — Oran: *${Number(c.total_odd).toFixed(2)}* (${stLabel})`);
           for (let i = 0; i < (c.legs || []).length; i++) {

@@ -195,6 +195,31 @@ def test_evaluate_pick_outcome_extended_markets():
     assert evaluate_pick_outcome("gol_0_1", 2, 0, "live") == {"status": "live_lost", "locked": True}
 
 
+def test_evaluate_pick_first_half_stoppage_time():
+    # Stoppage time 45+2' is still first half, NOT second half
+    res = evaluate_pick_outcome("iy_1", 1, 0, "live", ht_home_goals=None, ht_away_goals=None, live_minute="45+2'")
+    assert res == {"status": "live_won", "locked": False}
+    # Minute 46' means HT is finished and locked
+    res_ht_done = evaluate_pick_outcome("iy_1", 1, 0, "live", ht_home_goals=1, ht_away_goals=0, live_minute="46'")
+    assert res_ht_done == {"status": "live_won", "locked": True}
+
+
+def test_openfootball_brazil_calendar_season():
+    from backend.providers.openfootball_json_provider import OpenFootballJsonProvider
+
+    requested_urls: list[str] = []
+
+    class _FakeHttp:
+        def get_json(self, url, **kwargs):
+            requested_urls.append(url)
+            return {"matches": []}, 200, 10, "2026-11-28T00:00:00Z"
+
+    prov = OpenFootballJsonProvider(http=_FakeHttp())
+    prov.fetch_upcoming_fixtures(season="2026-27")
+    br_urls = [u for u in requested_urls if "br.1.json" in u]
+    assert br_urls == ["https://raw.githubusercontent.com/openfootball/football.json/master/2026/br.1.json"]
+
+
 def test_silent_results_sync_and_learning_weights(temp_repo):
     repo = temp_repo
     b = _make_bundle(1, "Türkiye Süper Lig", 1.9, 0.8, 0.8)

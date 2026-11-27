@@ -11,17 +11,19 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from backend.backtesting.version_manager import ModelVersionManager
 from backend.backtesting.walk_forward import run_walk_forward_backtest
 from backend.collectors.failover_manager import MultiSourceFailoverManager
 from backend.config import get_settings
+from backend.database.client import get_db_client
 from backend.database.repositories import AyzelaRepository
-from backend.database.sqlite_backend import SQLiteClient
 
 
 def main() -> None:
     settings = get_settings()
-    db = SQLiteClient(settings.sqlite_db_path)
-    db.init_schema(settings.migrations_dir)
+    db = get_db_client()
+    if settings.db_backend == "sqlite":
+        db.init_schema(settings.migrations_dir)
     repo = AyzelaRepository(db)
     mgr = MultiSourceFailoverManager(repo=repo)
 
@@ -69,6 +71,23 @@ def main() -> None:
                 now,
             ),
         )
+
+    ens_m = report["models"].get("ensemble")
+    if ens_m and ens_m.get("evaluated_matches", 0) > 0:
+        try:
+            vm = ModelVersionManager(repo)
+            promoted = vm.register_and_maybe_promote(
+                version_id=f"v1.0.0-wf-{now[:10]}",
+                model_name="Poisson + Dixon-Coles + Elo + Calibrated ML",
+                parameters={"weights": {"poisson": 0.30, "dixon_coles": 0.35, "elo": 0.20, "ml": 0.15}},
+                trained_matches_count=int(ens_m["evaluated_matches"]),
+                validation_brier=float(ens_m["brier_score"]),
+                validation_log_loss=float(ens_m["log_loss"]),
+                validation_accuracy=float(ens_m["accuracy"]),
+            )
+            print(f"Model sürüm değerlendirmesi tamamlandı (promoted={promoted}).")
+        except Exception as exc:
+            repo.log("WARNING", "scripts.run_backtest", f"Model sürüm kaydı atlandı: {exc}")
 
 
 if __name__ == "__main__":

@@ -4,13 +4,14 @@ export interface Env {
   APP_ENV: string;
   TZ: string;
   FREE_ONLY_MODE: string;
+  TELEGRAM_ENABLED?: string;
   ADMIN_USERNAME: string;
   PANEL_ORIGIN: string;
   GITHUB_REPOSITORY: string;
-  TELEGRAM_BOT_TOKEN: string;
-  TELEGRAM_ALLOWED_USER_ID: string;
-  TELEGRAM_CHAT_ID: string;
-  TELEGRAM_WEBHOOK_SECRET: string;
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_ALLOWED_USER_ID?: string;
+  TELEGRAM_CHAT_ID?: string;
+  TELEGRAM_WEBHOOK_SECRET?: string;
   ADMIN_SESSION_SECRET: string;
   ADMIN_PASSWORD_HASH: string;
   GITHUB_DISPATCH_TOKEN: string;
@@ -18,7 +19,7 @@ export interface Env {
 
 const enc = new TextEncoder();
 
-function timingSafeEqual(a: string, b: string): boolean {
+export function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
   for (let i = 0; i < a.length; i++) {

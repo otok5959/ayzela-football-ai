@@ -45,8 +45,8 @@ function isSecondHalfOrHt(liveMinute?: string | null): boolean {
   if (!liveMinute) return false;
   const m = liveMinute.trim().toUpperCase();
   if (m === "İY" || m === "DEVRE ARASI" || m === "MS") return true;
-  const digits = m.replace(/\D/g, "");
-  return Boolean(digits && Number(digits) >= 46);
+  const match = m.match(/^(\d+)/);
+  return Boolean(match && Number(match[1]) >= 46);
 }
 
 export function evaluatePick(
@@ -363,6 +363,8 @@ export async function enrichAndSilentPersist(env: Env, rows: any[]): Promise<any
               ON CONFLICT(fixture_id) DO UPDATE SET
                 home_goals = excluded.home_goals,
                 away_goals = excluded.away_goals,
+                ht_home_goals = COALESCE(excluded.ht_home_goals, match_results.ht_home_goals),
+                ht_away_goals = COALESCE(excluded.ht_away_goals, match_results.ht_away_goals),
                 outcome_1x2 = excluded.outcome_1x2,
                 btts = excluded.btts,
                 total_goals = excluded.total_goals,
@@ -452,8 +454,9 @@ export async function enrichCouponsWithLiveScores(env: Env, couponRows: any[]): 
   }
 
   const dbFixtureMap = new Map<string, any>();
-  if (fixtureIds.length > 0) {
-    const placeholders = fixtureIds.map(() => "?").join(",");
+  for (let i = 0; i < fixtureIds.length; i += 45) {
+    const chunk = fixtureIds.slice(i, i + 45);
+    const placeholders = chunk.map(() => "?").join(",");
     const dbRes = await env.DB.prepare(
       `SELECT f.fixture_id, f.iddaa_event_id, f.status, f.live_home_goals, f.live_away_goals,
               f.live_ht_home_goals, f.live_ht_away_goals, f.live_minute,
@@ -463,7 +466,7 @@ export async function enrichCouponsWithLiveScores(env: Env, couponRows: any[]): 
        LEFT JOIN match_results mr ON f.fixture_id = mr.fixture_id
        WHERE f.fixture_id IN (${placeholders})`
     )
-      .bind(...fixtureIds)
+      .bind(...chunk)
       .all();
     for (const r of dbRes.results || []) {
       dbFixtureMap.set(String((r as any).fixture_id), r);

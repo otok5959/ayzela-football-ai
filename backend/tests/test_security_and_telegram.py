@@ -141,3 +141,20 @@ def test_multiuser_telegram_subscribers_broadcast_and_coupons_cmd(temp_repo):
     b_res = bot.send_message("Test yayını", dedup_key="broadcast_test_1", notification_type="daily_report")
     assert b_res["sent"] is True
     assert len(b_res.get("recipients", [])) == 2
+
+
+def test_failed_telegram_notification_allows_retry(temp_repo):
+    saved = temp_repo.record_telegram_notification(
+        dedup_key="retry_key_1",
+        chat_id="111222333",
+        notification_type="daily_report",
+        message_text="İlk deneme",
+        sent_status="failed",
+    )
+    assert saved is True
+    assert temp_repo.was_notification_sent("retry_key_1") is False
+
+    bot = TelegramBotClient(repo=temp_repo, bot_token="", chat_id="111222333")
+    r_retry = bot.send_message("İkinci deneme", dedup_key="retry_key_1", notification_type="daily_report")
+    assert r_retry["sent"] is True
+    assert temp_repo.was_notification_sent("retry_key_1") is True

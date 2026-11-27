@@ -9,9 +9,9 @@ Son Güncelleme: **2026-11-25** (`Europe/Istanbul`)
 | Aşama 3 | İddaa.com + 11 açık veri adaptörü, otomatik yedekleme ve lig filtresi | ✅ Tamamlandı |
 | Aşama 4 | 12 bağımsız Python araştırma modülü (harici LLM olmadan) | ✅ Tamamlandı |
 | Aşama 5 | Poisson, Dixon-Coles (MLE), Elo, ML modelleri ve pazar olasılık hesaplayıcısı | ✅ Tamamlandı |
-| Aşama 6 | 18 komutlu tek kullanıcılı Telegram botu, dedup ve inline menü | ✅ Tamamlandı |
+| Aşama 6 | PWA odaklı çalışma modu (Telegram opsiyonel/kapalı, çekirdek bildirim altyapısı testli) | ✅ Tamamlandı |
 | Aşama 7 | Sonuç senkronizasyonu, metrikler, walk-forward backtest ve sürüm geri alma | ✅ Tamamlandı |
-| Aşama 8 | 16 bölümlü koyu tema mobil uyumlu PWA yönetim paneli | ✅ Tamamlandı |
+| Aşama 8 | 18 bölümlü koyu tema mobil uyumlu PWA yönetim paneli ve gelişmiş kontrol ekranı | ✅ Tamamlandı |
 | Aşama 9 | Cloudflare Workers API, D1 bağlayıcıları ve 6 GitHub Actions iş akışı | ✅ Tamamlandı |
 | Aşama 10 | Güvenlik, entegrasyon, canlı kaynak ve performans kabul testleri | ✅ Tamamlandı |
 

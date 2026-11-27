@@ -28,7 +28,12 @@ def main() -> None:
         db.init_schema(settings.migrations_dir)
     repo = AyzelaRepository(db)
     failover = MultiSourceFailoverManager(repo=repo)
-    res = run_daily_analysis(repo=repo, failover=failover, run_type=args.run_type, send_telegram=not args.no_telegram)
+    res = run_daily_analysis(
+        repo=repo,
+        failover=failover,
+        run_type=args.run_type,
+        send_telegram=(settings.telegram_enabled and not args.no_telegram),
+    )
     print(f"Tamamlandı: run_id={res['run_id']}, maç={len(res.get('bundles', []))}, kaynak={res.get('bulletin_source')}")
 
 

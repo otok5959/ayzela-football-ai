@@ -3,14 +3,15 @@ main = "src/index.ts"
 compatibility_date = "2025-02-01"
 
 # Gizli anahtarlar buraya yazılmaz; wrangler secret put ile eklenir:
-# TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USER_ID, TELEGRAM_CHAT_ID,
-# TELEGRAM_WEBHOOK_SECRET, ADMIN_SESSION_SECRET, ADMIN_PASSWORD_HASH,
-# GITHUB_DISPATCH_TOKEN
+# Zorunlu: ADMIN_SESSION_SECRET, ADMIN_PASSWORD_HASH, GITHUB_DISPATCH_TOKEN
+# Opsiyonel (sadece TELEGRAM_ENABLED="true" ise): TELEGRAM_BOT_TOKEN,
+# TELEGRAM_ALLOWED_USER_ID, TELEGRAM_CHAT_ID, TELEGRAM_WEBHOOK_SECRET
 
 [vars]
 APP_ENV = "production"
 TZ = "Europe/Istanbul"
 FREE_ONLY_MODE = "true"
+TELEGRAM_ENABLED = "false"
 ADMIN_USERNAME = "ayzela_admin"
 PANEL_ORIGIN = "https://ayzela-football-ai-api.otok5959.workers.dev"
 GITHUB_REPOSITORY = "otok5959/ayzela-football-ai"

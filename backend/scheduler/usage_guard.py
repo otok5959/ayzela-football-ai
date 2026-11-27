@@ -1,11 +1,24 @@
-"""Zero-cost usage limit guard: tracks free-tier quotas, warns at 80%, stops at 95%."""
+"""Zero-cost usage limit guard: tracks free-tier quotas, auto-resets expired windows, warns at 80%, stops at 95%."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 from backend.config import FreeOnlyModeViolation, get_settings
 from backend.database.repositories import AyzelaRepository
+
+
+def _next_reset_iso(period: str, now_utc: datetime) -> str:
+    if period == "daily":
+        nxt = (now_utc + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        return nxt.strftime("%Y-%m-%dT%H:%M:%SZ")
+    # monthly: first day of next UTC month
+    if now_utc.month == 12:
+        nxt = now_utc.replace(year=now_utc.year + 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    else:
+        nxt = now_utc.replace(month=now_utc.month + 1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    return nxt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @dataclass
@@ -46,6 +59,23 @@ class UsageLimitGuard:
         max_lim = int(row["max_limit"])
         warn_pct = int(row["warn_threshold_pct"])
         stop_pct = int(row["hard_stop_threshold_pct"])
+
+        now_utc = datetime.now(timezone.utc)
+        reset_raw = row.get("reset_at_utc")
+        if reset_raw:
+            try:
+                reset_dt = datetime.fromisoformat(str(reset_raw).replace("Z", "+00:00"))
+                if reset_dt.tzinfo is None:
+                    reset_dt = reset_dt.replace(tzinfo=timezone.utc)
+                if reset_dt <= now_utc:
+                    new_reset = _next_reset_iso(str(row.get("period") or "daily"), now_utc)
+                    self.repo.db.execute(
+                        "UPDATE usage_limits SET used_amount = 0, reset_at_utc = ?, updated_at = ? WHERE resource_key = ?",
+                        (new_reset, now_utc.strftime("%Y-%m-%dT%H:%M:%SZ"), resource_key),
+                    )
+                    used = 0
+            except Exception:
+                pass
 
         projected = used + units
         pct = (projected / max_lim * 100.0) if max_lim > 0 else 0.0
